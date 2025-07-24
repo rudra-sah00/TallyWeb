@@ -1,191 +1,58 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { TrendingUp, Users, ShoppingCart, DollarSign, RefreshCw, AlertCircle } from 'lucide-react';
-import { useDashboardContext } from '../../../context/DashboardContext';
+import React from 'react';
+import { SalesVoucher, DateRangeOption } from '../../../services/api/sales/salesApiService';
+import SalesApiService from '../../../services/api/sales/salesApiService';
 import { formatCurrency } from '../../../shared/utils/formatters';
-import SalesApiService, { SalesStatistics } from '../../../services/api/sales/salesApiService';
-import SalesCacheService from '../../../services/cache/salesCacheService';
+import { Calendar, User, Receipt, DollarSign, RefreshCw } from 'lucide-react';
 
-const SalesOverview: React.FC = () => {
-  const { selectedCompany } = useDashboardContext();
-  const [statistics, setStatistics] = useState<SalesStatistics | null>(null);
-  const [topCustomers, setTopCustomers] = useState<Array<{ name: string; amount: number; voucherCount: number }>>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+interface SalesOverviewProps {
+  salesVouchers: SalesVoucher[];
+  currentRangeLabel: string;
+  loading: boolean;
+  onVoucherClick: (voucher: SalesVoucher) => void;
+  onDateRangeChange: (dateRange: DateRangeOption, customFrom?: Date, customTo?: Date) => void;
+  salesApi: SalesApiService;
+}
 
-  const salesApi = useMemo(() => new SalesApiService(), []);
-  const cacheService = useMemo(() => SalesCacheService.getInstance(), []);
+const SalesOverview: React.FC<SalesOverviewProps> = ({
+  salesVouchers,
+  currentRangeLabel,
+  loading,
+  onVoucherClick,
+  onDateRangeChange
+}) => {
+  const [selectedDateRange, setSelectedDateRange] = React.useState<DateRangeOption>('currentMonth');
+  const [customFromDate, setCustomFromDate] = React.useState<string>('');
+  const [customToDate, setCustomToDate] = React.useState<string>('');
 
-  // Date range - current month
-  const getDateRange = useCallback(() => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const fromDate = `${year}${month}01`; // First day of current month
-    const toDate = now.toISOString().split('T')[0].replace(/-/g, ''); // Today
-    
-    return { fromDate, toDate };
-  }, []);
+  const handleDateRangeChange = (range: DateRangeOption) => {
+    setSelectedDateRange(range);
+    onDateRangeChange(range);
+  };
 
-  // Load top customers separately for better performance
-  const loadTopCustomers = useCallback(async (
-    fromDate: string,
-    toDate: string,
-    companyName: string
-  ) => {
-    try {
-      const customers = await salesApi.getTopCustomers(fromDate, toDate, companyName, 10);
-      setTopCustomers(customers);
-    } catch (err) {
-      console.warn('Failed to load top customers:', err);
+  const handleCustomDateSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (customFromDate && customToDate) {
+      onDateRangeChange('custom', new Date(customFromDate), new Date(customToDate));
     }
-  }, [salesApi]);
+  };
 
-  // Load sales overview data
-  const loadSalesOverview = useCallback(async (forceRefresh: boolean = false) => {
-    if (!selectedCompany) {
-      setError('Please select a company first');
-      return;
-    }
+  const totalSales = salesVouchers.reduce((sum, voucher) => sum + voucher.amount, 0);
+  const totalVouchers = salesVouchers.length;
 
-    try {
-      setLoading(true);
-      setError(null);
+  const dateRangeOptions = [
+    { value: 'currentMonth' as DateRangeOption, label: 'This Month' },
+    { value: 'lastMonth' as DateRangeOption, label: 'Last Month' },
+    { value: 'currentYear' as DateRangeOption, label: 'Current FY' },
+    { value: 'lastYear' as DateRangeOption, label: 'Previous FY' },
+    { value: 'custom' as DateRangeOption, label: 'Custom Range' }
+  ];
 
-      const { fromDate, toDate } = getDateRange();
-
-      // Check cache first (unless force refresh)
-      if (!forceRefresh) {
-        const cachedStats = cacheService.getCachedSalesStatistics(fromDate, toDate, selectedCompany);
-        if (cachedStats) {
-          setStatistics(cachedStats);
-          setLoading(false);
-          
-          // Load top customers separately (they might be cached too)
-          loadTopCustomers(fromDate, toDate, selectedCompany);
-          return;
-        }
-      }
-
-      // Fetch from API
-      const [statsResponse, customersResponse] = await Promise.all([
-        salesApi.getSalesStatistics(fromDate, toDate, selectedCompany),
-        salesApi.getTopCustomers(fromDate, toDate, selectedCompany, 10)
-      ]);
-
-      setStatistics(statsResponse);
-      setTopCustomers(customersResponse);
-      setLastUpdated(new Date());
-
-      // Cache the results
-      cacheService.cacheSalesStatistics(fromDate, toDate, selectedCompany, statsResponse);
-
-    } catch (err) {
-      console.error('Error loading sales overview:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load sales overview');
-      
-      // Try to load cached data as fallback
-      const { fromDate, toDate } = getDateRange();
-      const cachedStats = cacheService.getCachedSalesStatistics(fromDate, toDate, selectedCompany);
-      if (cachedStats) {
-        setStatistics(cachedStats);
-        setError('Using cached data - server connection failed');
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedCompany, getDateRange, salesApi, cacheService, loadTopCustomers]);
-
-  // Handle refresh
-  const handleRefresh = useCallback(() => {
-    if (selectedCompany) {
-      const { fromDate, toDate } = getDateRange();
-      cacheService.clearCacheForCriteria(fromDate, toDate, selectedCompany);
-    }
-    loadSalesOverview(true);
-  }, [selectedCompany, getDateRange, cacheService, loadSalesOverview]);
-
-  // Initial load
-  useEffect(() => {
-    if (selectedCompany) {
-      loadSalesOverview();
-    }
-  }, [selectedCompany, loadSalesOverview]);
-
-  // Generate overview cards from statistics
-  const overviewCards = useMemo(() => {
-    if (!statistics) return [];
-
-    return [
-      {
-        title: 'Total Sales',
-        value: statistics.totalSales,
-        change: '+12.5%', // Could be calculated from historical data
-        trend: 'up',
-        icon: DollarSign,
-        color: 'green',
-        format: 'currency'
-      },
-      {
-        title: 'Active Customers',
-        value: topCustomers.length,
-        change: `+${Math.min(topCustomers.length, 3)}`,
-        trend: 'up',
-        icon: Users,
-        color: 'blue',
-        format: 'number'
-      },
-      {
-        title: 'Total Transactions',
-        value: statistics.totalVouchers,
-        change: '+8.2%',
-        trend: 'up',
-        icon: ShoppingCart,
-        color: 'purple',
-        format: 'number'
-      },
-      {
-        title: 'Average Order Value',
-        value: statistics.averageOrderValue,
-        change: '+5.1%',
-        trend: 'up',
-        icon: TrendingUp,
-        color: 'amber',
-        format: 'currency'
-      }
-    ];
-  }, [statistics, topCustomers]);
-
-  const getColorClasses = useCallback((color: string) => {
-    const colors = {
-      green: 'bg-green-50 border-green-200 text-green-700',
-      blue: 'bg-blue-50 border-blue-200 text-blue-700',
-      purple: 'bg-purple-50 border-purple-200 text-purple-700',
-      amber: 'bg-amber-50 border-amber-200 text-amber-700'
-    };
-    return colors[color as keyof typeof colors] || colors.green;
-  }, []);
-
-  // Show error state
-  if (error && !statistics) {
+  if (loading) {
     return (
-      <div className="space-y-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <div className="flex items-center mb-4">
-            <AlertCircle className="text-red-600 mr-3" size={24} />
-            <h3 className="text-lg font-medium text-red-800">Error Loading Sales Overview</h3>
-          </div>
-          <p className="text-red-700 mb-4">{error}</p>
-          <div className="flex gap-3">
-            <button
-              onClick={handleRefresh}
-              disabled={loading}
-              className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
-            >
-              <RefreshCw size={16} className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Retry
-            </button>
-          </div>
+      <div className="flex items-center justify-center h-64">
+        <div className="flex items-center space-x-3">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500" />
+          <span className="text-lg text-gray-600">Loading sales data...</span>
         </div>
       </div>
     );
@@ -193,155 +60,166 @@ const SalesOverview: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Debug Info */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
-        <strong>Debug Info:</strong><br/>
-        Selected Company: {selectedCompany || 'None'}<br/>
-        Loading: {loading ? 'Yes' : 'No'}<br/>
-        Error: {error || 'None'}<br/>
-        Statistics: {statistics ? 'Loaded' : 'Not loaded'}<br/>
-        Top Customers: {topCustomers.length} customers
-      </div>
-
-      {/* Header with refresh button */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-gray-800">Sales Overview</h2>
-          {lastUpdated && (
-            <p className="text-sm text-gray-600 mt-1">
-              Last updated: {lastUpdated.toLocaleString()}
-            </p>
-          )}
-        </div>
-        <button
-          onClick={handleRefresh}
-          disabled={loading}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-        >
-          <RefreshCw size={16} className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
-      </div>
-
-      {/* Error banner for cached data */}
-      {error && statistics && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <p className="text-amber-800">{error}</p>
-        </div>
-      )}
-
-      {/* Loading state */}
-      {loading && !statistics && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-          {[...Array(4)].map((_, index) => (
-            <div key={index} className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-              <div className="animate-pulse">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-gray-200 rounded-lg"></div>
-                  <div className="w-16 h-4 bg-gray-200 rounded"></div>
-                </div>
-                <div className="w-24 h-4 bg-gray-200 rounded mb-2"></div>
-                <div className="w-32 h-8 bg-gray-200 rounded"></div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Overview Cards */}
-      {statistics && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-          {overviewCards.map((card, index) => {
-            const Icon = card.icon;
-            
-            return (
-              <div
-                key={index}
-                className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow"
+      {/* Date Range Selector */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-6">
+        <div className="flex flex-wrap items-center gap-4 mb-4">
+          <h3 className="text-lg font-semibold text-gray-800">Date Range:</h3>
+          
+          {/* Quick Date Range Buttons */}
+          <div className="flex flex-wrap gap-2">
+            {dateRangeOptions.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => handleDateRangeChange(option.value)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  selectedDateRange === option.value
+                    ? 'bg-blue-500 text-white shadow-md transform scale-105'
+                    : 'bg-white text-gray-700 hover:bg-blue-100 border border-gray-200'
+                }`}
               >
-                <div className="flex items-center justify-between mb-4">
-                  <div className={`p-3 rounded-lg border ${getColorClasses(card.color)}`}>
-                    <Icon size={24} />
-                  </div>
-                  <span className="text-sm font-medium text-green-600">{card.change}</span>
-                </div>
-                
-                <h3 className="text-gray-600 text-sm font-medium mb-1">{card.title}</h3>
-                <p className="text-2xl font-bold text-gray-800">
-                  {card.format === 'currency' 
-                    ? formatCurrency(card.value)
-                    : card.value.toLocaleString()
-                  }
-                </p>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Detailed Sections */}
-      {statistics && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {/* Top Customers */}
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-700 mb-4">Top Customers</h3>
-            {topCustomers.length > 0 ? (
-              <div className="space-y-3">
-                {topCustomers.slice(0, 5).map((customer, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div>
-                      <span className="font-medium text-gray-800">{customer.name}</span>
-                      <p className="text-sm text-gray-600">
-                        {customer.voucherCount} transaction{customer.voucherCount !== 1 ? 's' : ''}
-                      </p>
-                    </div>
-                    <span className="font-bold text-green-600">{formatCurrency(customer.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <Users className="mx-auto mb-4 text-gray-400" size={48} />
-                <p className="text-gray-600">No customer data available</p>
-                <p className="text-sm text-gray-400 mt-2">Sales data will appear here once available</p>
-              </div>
-            )}
+                {option.label}
+              </button>
+            ))}
           </div>
+          
+          <button
+            onClick={() => onDateRangeChange(selectedDateRange)}
+            className="ml-auto px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors flex items-center space-x-2 shadow-md"
+          >
+            <RefreshCw className="h-4 w-4" />
+            <span>Refresh</span>
+          </button>
+        </div>
+        
+        {/* Custom Date Range Form */}
+        {selectedDateRange === 'custom' && (
+          <form onSubmit={handleCustomDateSubmit} className="flex items-center gap-4 mt-4 p-4 bg-white rounded-lg border border-blue-200">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">From Date</label>
+              <input
+                type="date"
+                value={customFromDate}
+                onChange={(e) => setCustomFromDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">To Date</label>
+              <input
+                type="date"
+                value={customToDate}
+                onChange={(e) => setCustomToDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="mt-6 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+            >
+              Apply Range
+            </button>
+          </form>
+        )}
+      </div>
 
-          {/* Sales Summary */}
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-700 mb-4">Sales Summary</h3>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center p-3 border border-gray-100 rounded-lg">
-                <span className="text-gray-600">Total Revenue</span>
-                <span className="font-bold text-gray-800">{formatCurrency(statistics.totalSales)}</span>
-              </div>
-              <div className="flex justify-between items-center p-3 border border-gray-100 rounded-lg">
-                <span className="text-gray-600">Transaction Count</span>
-                <span className="font-bold text-gray-800">{statistics.totalVouchers.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between items-center p-3 border border-gray-100 rounded-lg">
-                <span className="text-gray-600">Average Order Value</span>
-                <span className="font-bold text-gray-800">{formatCurrency(statistics.averageOrderValue)}</span>
-              </div>
-              <div className="flex justify-between items-center p-3 border border-gray-100 rounded-lg">
-                <span className="text-gray-600">Active Customers</span>
-                <span className="font-bold text-gray-800">{topCustomers.length}</span>
-              </div>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl p-6 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-emerald-100 text-sm font-medium">Total Sales</p>
+              <p className="text-3xl font-bold">{formatCurrency(totalSales)}</p>
+              <p className="text-emerald-200 text-sm mt-1">{currentRangeLabel}</p>
+            </div>
+            <div className="h-14 w-14 bg-emerald-400 rounded-lg flex items-center justify-center">
+              <DollarSign className="h-8 w-8 text-white" />
             </div>
           </div>
         </div>
-      )}
 
-      {/* Performance Note */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h4 className="font-medium text-blue-800 mb-2">Performance Optimizations Active</h4>
-        <ul className="text-sm text-blue-700 space-y-1">
-          <li>• Data is cached for faster subsequent loads</li>
-          <li>• Background prefetching for smooth navigation</li>
-          <li>• Optimized for large datasets (1+ lakh records)</li>
-          <li>• Real-time Tally API integration with fallback support</li>
-        </ul>
+        <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-xl p-6 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-indigo-100 text-sm font-medium">Total Orders</p>
+              <p className="text-3xl font-bold">{totalVouchers}</p>
+              <p className="text-indigo-200 text-sm mt-1">Sales Transactions</p>
+            </div>
+            <div className="h-14 w-14 bg-indigo-400 rounded-lg flex items-center justify-center">
+              <Receipt className="h-8 w-8 text-white" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Sales Table */}
+      <div className="bg-white rounded-xl shadow-lg border border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100">
+          <h2 className="text-xl font-semibold text-gray-800">Sales</h2>
+          <p className="text-sm text-gray-600 mt-1">All sales transactions for {currentRangeLabel.toLowerCase()}</p>
+        </div>
+        
+        {salesVouchers.length === 0 ? (
+          <div className="p-12 text-center">
+            <Receipt className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-medium text-gray-900 mb-2">No Sales Data</h3>
+            <p className="text-gray-600">No sales vouchers found for {currentRangeLabel.toLowerCase()}.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Date
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Voucher Number
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Customer
+                  </th>
+                  <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Amount
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {salesVouchers.map((voucher, index) => (
+                  <tr key={voucher.id} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-25'}`}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <div className="flex items-center">
+                        <Calendar className="h-4 w-4 text-gray-400 mr-2" />
+                        {voucher.date}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <button
+                        onClick={() => onVoucherClick(voucher)}
+                        className="flex items-center text-blue-600 hover:text-blue-800 hover:underline transition-colors font-medium"
+                      >
+                        <Receipt className="h-4 w-4 text-gray-400 mr-2" />
+                        {voucher.voucherNumber}
+                      </button>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <div className="flex items-center">
+                        <User className="h-4 w-4 text-gray-400 mr-2" />
+                        <span className="truncate max-w-[200px]" title={voucher.partyName}>
+                          {voucher.partyName}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-semibold">
+                      {formatCurrency(voucher.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

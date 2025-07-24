@@ -1,22 +1,57 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Search, RefreshCw, BarChart3, Package2 } from 'lucide-react';
-import { inventoryApiService, type StockItem } from '../../services/api/inventory/inventoryApiService';
+import { Search, RefreshCw, BarChart3, Package2, ChevronDown } from 'lucide-react';
+import { inventoryApiService, type StockItem, type StockItemsResponse } from '../../services/api/inventory/inventoryApiService';
 import { stockAnalyticsService, type StockAnalytics } from '../../services/api/inventory/stockAnalyticsService';
 import { cacheService } from '../../services/cacheService';
+import { useCompany } from '../../context/CompanyContext';
 import StockItemsList from './components/StockItemsList';
 import StockAnalyticsComponent from './components/StockAnalytics';
 
 type InventoryTab = 'stock-items' | 'analytics';
 
 const InventoryModule: React.FC = () => {
+  const { selectedCompany, serverUrl } = useCompany();
+  
   const [activeTab, setActiveTab] = useState<InventoryTab>('stock-items');
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [analytics, setAnalytics] = useState<StockAnalytics | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalCount, setTotalCount] = useState(0);
+  const pageSize = 50; // Load 50 items at a time
+
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+
+  // Update API base URL when serverUrl changes
+  useEffect(() => {
+    if (serverUrl) {
+      inventoryApiService.setBaseURL(`http://${serverUrl}`);
+    }
+  }, [serverUrl]);
+
+  // Debounce search term
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Reset pagination when search term changes
+  useEffect(() => {
+    if (debouncedSearchTerm !== searchTerm) return;
+    setCurrentPage(1);
+    setStockItems([]);
+    setHasMore(true);
+    loadStockItems(true, 1, debouncedSearchTerm);
+  }, [debouncedSearchTerm]);
 
   useEffect(() => {
     loadStockItems();
@@ -29,24 +64,65 @@ const InventoryModule: React.FC = () => {
     }
   }, [activeTab, stockItems, analytics]);
 
-  const loadStockItems = async (forceRefresh = false) => {
-    setLoading(true);
+  const loadStockItems = useCallback(async (
+    forceRefresh = false, 
+    page = currentPage, 
+    search = debouncedSearchTerm
+  ) => {
+    if (!selectedCompany) {
+      setError('No company selected. Please select a company first.');
+      return;
+    }
+    
+    if (page === 1) {
+      setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
     setError(null);
+    
     try {
-      const response = await inventoryApiService.getStockItems(forceRefresh);
-      setStockItems(response.items);
+      console.log(`🔄 Loading stock items... (page: ${page}, search: "${search}", forceRefresh: ${forceRefresh})`);
+      const response: StockItemsResponse = await inventoryApiService.getStockItems({
+        page,
+        pageSize,
+        searchTerm: search,
+        forceRefresh,
+        companyName: selectedCompany
+      });
+      
+      console.log(`📦 Received ${response.items.length} stock items from API`);
+      console.log(`📊 Pagination info:`, {
+        currentPage: response.currentPage,
+        totalCount: response.totalCount,
+        hasMore: response.hasMore,
+        pageSize: response.pageSize
+      });
+      
+      if (page === 1) {
+        // First page or search - replace items
+        setStockItems(response.items);
+      } else {
+        // Additional pages - append items
+        setStockItems(prev => [...prev, ...response.items]);
+      }
+      
+      setCurrentPage(response.currentPage);
+      setHasMore(response.hasMore);
+      setTotalCount(response.totalCount);
       
       // Clear analytics if we're refreshing data
       if (forceRefresh) {
         setAnalytics(null);
       }
     } catch (error) {
-      console.error('Error loading stock items:', error);
+      console.error('❌ Error loading stock items:', error);
       setError(error instanceof Error ? error.message : 'Failed to load stock items');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  };
+  }, [currentPage, debouncedSearchTerm, pageSize, selectedCompany]);
 
   const generateAnalytics = () => {
     if (stockItems.length === 0) {
@@ -72,9 +148,18 @@ const InventoryModule: React.FC = () => {
   };
 
   const handleRefresh = () => {
-    loadStockItems(true); // Force refresh
+    setCurrentPage(1);
+    setStockItems([]);
+    setHasMore(true);
+    loadStockItems(true, 1, debouncedSearchTerm); // Force refresh
     // Clear cache
     cacheService.delete('stockItems');
+  };
+
+  const handleLoadMore = () => {
+    if (!loadingMore && hasMore) {
+      loadStockItems(false, currentPage + 1, debouncedSearchTerm);
+    }
   };
 
   const tabs = [
@@ -92,12 +177,6 @@ const InventoryModule: React.FC = () => {
     }
   ];
 
-  // Filter data based on search term
-  const filteredStockItems = stockItems.filter(item =>
-    item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (item.languageName && item.languageName.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
-
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -108,7 +187,16 @@ const InventoryModule: React.FC = () => {
       >
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Inventory Management</h1>
-          <p className="text-gray-600 mt-1">Manage stock items and view inventory summaries</p>
+          <p className="text-gray-600 mt-1">
+            Manage stock items and view inventory summaries 
+            {stockItems.length > 0 && (
+              <span className="ml-2 text-sm font-medium text-blue-600">
+                • {stockItems.length.toLocaleString()} items loaded
+                {totalCount > stockItems.length && ` of ${totalCount.toLocaleString()} total`}
+                {searchTerm && ` • filtered by "${searchTerm}"`}
+              </span>
+            )}
+          </p>
         </div>
         
         <div className="flex items-center gap-3">
@@ -133,7 +221,7 @@ const InventoryModule: React.FC = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input
                 type="text"
-                placeholder="Search..."
+                placeholder="Search stock items..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent w-64"
@@ -205,11 +293,40 @@ const InventoryModule: React.FC = () => {
         className="space-y-6"
       >
         {activeTab === 'stock-items' && (
-          <StockItemsList
-            items={filteredStockItems}
-            loading={loading}
-            searchTerm={searchTerm}
-          />
+          <>
+            <StockItemsList
+              items={stockItems}
+              loading={loading}
+              searchTerm={debouncedSearchTerm}
+            />
+            
+            {/* Load More Button */}
+            {hasMore && stockItems.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex justify-center pt-6"
+              >
+                <button
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  className="flex items-center gap-2 px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+                >
+                  {loadingMore ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Loading more...
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-4 h-4" />
+                      Load More ({(totalCount - stockItems.length).toLocaleString()} remaining)
+                    </>
+                  )}
+                </button>
+              </motion.div>
+            )}
+          </>
         )}
 
         {activeTab === 'analytics' && (

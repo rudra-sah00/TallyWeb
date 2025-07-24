@@ -13,6 +13,8 @@ export default defineConfig({
         target: 'http://192.168.31.119:9000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/tally/, ''),
+        timeout: 120000, // 2 minutes timeout for Tally API
+        proxyTimeout: 120000, // 2 minutes proxy timeout
       }
     }
   }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Package, ChevronRight, DollarSign, Package2, TrendingUp, Info } from 'lucide-react';
 import { StockItem } from '../../../services/api/inventory/inventoryApiService';
@@ -16,6 +16,36 @@ interface StockItemDetailsModalProps {
 }
 
 const StockItemDetailsModal: React.FC<StockItemDetailsModalProps> = ({ item, isOpen, onClose }) => {
+  // Prevent background scroll when modal is open
+  useEffect(() => {
+    if (isOpen) {
+      // Save current body overflow and prevent scrolling
+      const originalStyle = window.getComputedStyle(document.body).overflow;
+      document.body.style.overflow = 'hidden';
+      
+      // Cleanup function to restore scrolling when modal closes
+      return () => {
+        document.body.style.overflow = originalStyle;
+      };
+    }
+  }, [isOpen]);
+
+  // Handle escape key to close modal
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscape);
+      return () => {
+        document.removeEventListener('keydown', handleEscape);
+      };
+    }
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const hasStock = item.closingBalance && parseFloat(item.closingBalance.replace(/[^\d.-]/g, '')) > 0;
@@ -23,12 +53,24 @@ const StockItemDetailsModal: React.FC<StockItemDetailsModalProps> = ({ item, isO
   const openingValue = parseFloat(item.openingValue.replace(/[^\d.-]/g, '')) || 0;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+      onWheel={(e) => e.preventDefault()}
+      onTouchMove={(e) => e.preventDefault()}
+      style={{ touchAction: 'none' }}
+      onClick={(e) => {
+        // Close modal if clicking on backdrop
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()} // Prevent modal content clicks from closing modal
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200">
@@ -277,11 +319,11 @@ const StockItemsList: React.FC<StockItemsListProps> = ({ items, loading, searchT
           })}
         </div>
 
-        {/* Pagination hint for large datasets */}
-        {items.length > 100 && (
+        {/* Info footer for large datasets */}
+        {items.length > 1000 && (
           <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
             <p className="text-sm text-gray-600 text-center">
-              Showing first 100 items. Use search to find specific items.
+              Displaying all {items.length.toLocaleString()} items. Use search above to find specific items quickly.
             </p>
           </div>
         )}

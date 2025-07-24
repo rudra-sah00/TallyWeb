@@ -4,12 +4,13 @@ import AppConfigService from '../config/appConfig';
 export default class BaseApiService {
   protected baseURL: string | null;
   private isDevelopment: boolean;
+  private static requestQueue: Promise<any> = Promise.resolve();
 
   constructor() {
     this.isDevelopment = import.meta.env.DEV;
     
     if (this.isDevelopment) {
-      // In development, always use proxy endpoint
+      // In development, always use proxy endpoint to avoid CORS
       this.baseURL = '/api/tally';
     } else {
       // Production mode, use user configuration
@@ -20,15 +21,27 @@ export default class BaseApiService {
 
   setBaseURL(url: string): void {
     if (this.isDevelopment) {
-      // In development, always use proxy endpoint
+      // In development, always use proxy endpoint to avoid CORS
       this.baseURL = '/api/tally';
+      console.log('Development mode: Using proxy /api/tally for URL:', url);
     } else {
       // Production mode, use direct URL
       this.baseURL = url;
+      console.log('Production mode: BaseAPI URL set to:', this.baseURL);
     }
   }
 
   protected async makeRequest(xmlRequest: string): Promise<string> {
+    // Queue requests to prevent simultaneous calls to Tally server
+    return BaseApiService.requestQueue = BaseApiService.requestQueue.then(async () => {
+      return this.executeRequest(xmlRequest);
+    }).catch(async () => {
+      // If previous request failed, still execute this one
+      return this.executeRequest(xmlRequest);
+    });
+  }
+
+  private async executeRequest(xmlRequest: string): Promise<string> {
     try {
       if (!this.baseURL) {
         throw new Error('Server configuration not available. Please configure server settings first.');
@@ -48,23 +61,26 @@ export default class BaseApiService {
         body: xmlRequest,
       };
 
-      // Check if we should use the Vite proxy instead of direct connection
+      // Use the configured base URL (proxy in dev, direct in prod)
       let requestUrl = this.baseURL;
-      if (this.baseURL.startsWith('http://192.168.1.2:9000')) {
-        // Use the Vite proxy to avoid CORS issues
-        requestUrl = '/api/tally';
-        console.log('Using Vite proxy:', requestUrl);
-      } else if (this.baseURL.startsWith('http://') && !this.baseURL.includes('/api/tally')) {
-        // For other external servers, add mode: 'cors'
-        requestOptions.mode = 'cors';
-        console.log('Using CORS mode for direct request');
+      
+      if (this.isDevelopment) {
+        // In development, we're using the Vite proxy
+        console.log('Using Vite proxy /api/tally');
+        // No need to set CORS mode as it's same-origin request to proxy
+      } else {
+        // For production direct connections, use CORS mode
+        if (this.baseURL.startsWith('http://')) {
+          requestOptions.mode = 'cors';
+          console.log('Using CORS mode for direct Tally request to:', requestUrl);
+        }
       }
 
-      // Create a timeout promise
+      // Create a timeout promise with reasonable timeout for Tally API
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => {
-          reject(new Error('Request timeout after 5 seconds. Please check if Tally server is running and accessible.'));
-        }, 5000);
+          reject(new Error('Request timeout after 45 seconds. Please check if Tally server is running and accessible.'));
+        }, 45000); // Set to 45 seconds - slightly more than curl time
       });
 
       // Race between fetch and timeout
@@ -74,10 +90,31 @@ export default class BaseApiService {
       ]);
 
       if (!response.ok) {
+        const responseText = await response.text();
+        
+        // Check for specific Tally errors
+        if (responseText.includes("Could not set 'SVCurrentCompany'")) {
+          const companyMatch = responseText.match(/'([^']+)'/);
+          const companyName = companyMatch ? companyMatch[1] : 'Unknown';
+          throw new Error(`Company "${companyName}" does not exist in Tally. Please check if:\n1. The company is created in Tally\n2. The company name is spelled correctly\n3. The company is currently open in Tally\n\nNote: Use "M/S. SAHOO SANITARY (2025-26)" - this is the available company in Tally.`);
+        }
+        
         throw new Error(`Tally API error: ${response.status} ${response.statusText}`);
       }
 
-      return await response.text();
+      const responseText = await response.text();
+      
+      console.log(`📊 Response received: ${responseText.length} characters`);
+      console.log(`📊 Response preview (first 200 chars):`, responseText.substring(0, 200));
+      
+      // Check for Tally errors in the response body
+      if (responseText.includes("Could not set 'SVCurrentCompany'")) {
+        const companyMatch = responseText.match(/'([^']+)'/);
+        const companyName = companyMatch ? companyMatch[1] : 'Unknown';
+        throw new Error(`Company "${companyName}" does not exist in Tally. Please check if:\n1. The company is created in Tally\n2. The company name is spelled correctly\n3. The company is currently open in Tally\n\nNote: Use "M/S. SAHOO SANITARY (2025-26)" - this is the available company in Tally.`);
+      }
+
+      return responseText;
     } catch (error) {
       console.error('Tally API request failed:', error);
       
@@ -97,7 +134,7 @@ Technical note: curl works but browser doesn't due to CORS security policy.`);
       }
       
       if (error instanceof Error && error.message.includes('timeout')) {
-        throw new Error(`Connection timeout to ${this.baseURL}. The server may be:\n1. Not responding within 5 seconds\n2. Network latency issues\n3. Blocked by firewall\n4. Server overloaded`);
+        throw new Error(`Connection timeout to ${this.baseURL}. The server may be:\n1. Not responding within 45 seconds\n2. Processing large datasets (this is normal for Tally)\n3. Multiple simultaneous requests overloading server\n4. Network latency issues\n5. Blocked by firewall\n\nTally API typically takes 30+ seconds for large data requests.`);
       }
       
       throw error;

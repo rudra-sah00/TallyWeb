@@ -49,7 +49,7 @@ const CompanySettings: React.FC = () => {
       // Fetch both basic details and tax details
       const [details, taxData] = await Promise.all([
         companyApi.getCompanyDetails(currentCompany),
-        companyApi.getCompanyTaxDetails()
+        companyApi.getCompanyTaxDetails(currentCompany)
       ]);
       
       setCompanyDetails(details);

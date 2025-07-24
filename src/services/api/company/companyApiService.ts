@@ -188,7 +188,7 @@ export default class CompanyApiService extends BaseApiService {
     }
   }
 
-  async getCompanyTaxDetails(): Promise<TallyCompanyTaxDetails | null> {
+  async getCompanyTaxDetails(companyName?: string): Promise<TallyCompanyTaxDetails | null> {
     const xmlRequest = `
 <ENVELOPE>
   <HEADER>
@@ -201,6 +201,7 @@ export default class CompanyApiService extends BaseApiService {
     <DESC>
       <STATICVARIABLES>
         <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        ${companyName ? `<SVCurrentCompany>${companyName}</SVCurrentCompany>` : ''}
       </STATICVARIABLES>
       <TDL>
         <TDLMESSAGE>

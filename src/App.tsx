@@ -9,6 +9,7 @@ import LedgerModule from './modules/ledger/LedgerModule';
 import CompanyModule from './modules/company/CompanyModule';
 import SettingsModule from './modules/settings/SettingsModule';
 import { DashboardProvider } from './context/DashboardContext';
+import { CompanyProvider } from './context/CompanyContext';
 import CompanySelection from './components/CompanySelection';
 import AppConfigService from './services/config/appConfig';
 
@@ -124,26 +125,28 @@ function App() {
       {/* Protected App Routes */}
       <Route path="/*" element={
         selectedCompany ? (
-          <DashboardProvider selectedCompany={selectedCompany} serverUrl={serverUrl}>
-            <div className="min-h-screen bg-gray-50 flex">
-              <Sidebar currentView={getCurrentView()} onViewChange={handleViewChange} onLogout={handleLogout} />
-              <main className="flex-1 transition-all duration-300 ml-0 lg:ml-16">
-                <Routes>
-                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/sales" element={<SalesModule />} />
-                  <Route path="/purchases" element={<PurchasesModule />} />
-                  <Route path="/inventory" element={<InventoryModule />} />
-                  <Route path="/expenses" element={<PlaceholderModule title="Expenses" description="Track and manage your business expenses" />} />
-                  <Route path="/reports" element={<PlaceholderModule title="Reports" description="Generate comprehensive financial reports" />} />
-                  <Route path="/gst" element={<PlaceholderModule title="GST Management" description="Handle GST calculations and filings" />} />
-                  <Route path="/ledger" element={<LedgerModule serverUrl={serverUrl || ''} />} />
-                  <Route path="/company" element={<CompanyModule />} />
-                  <Route path="/settings/*" element={<SettingsModule />} />
-                </Routes>
-              </main>
-            </div>
-          </DashboardProvider>
+          <CompanyProvider selectedCompany={selectedCompany} serverUrl={serverUrl || ''}>
+            <DashboardProvider selectedCompany={selectedCompany} serverUrl={serverUrl}>
+              <div className="min-h-screen bg-gray-50 flex">
+                <Sidebar currentView={getCurrentView()} onViewChange={handleViewChange} onLogout={handleLogout} />
+                <main className="flex-1 transition-all duration-300 ml-0 lg:ml-16">
+                  <Routes>
+                    <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/sales" element={<SalesModule />} />
+                    <Route path="/purchases" element={<PurchasesModule />} />
+                    <Route path="/inventory" element={<InventoryModule />} />
+                    <Route path="/expenses" element={<PlaceholderModule title="Expenses" description="Track and manage your business expenses" />} />
+                    <Route path="/reports" element={<PlaceholderModule title="Reports" description="Generate comprehensive financial reports" />} />
+                    <Route path="/gst" element={<PlaceholderModule title="GST Management" description="Handle GST calculations and filings" />} />
+                    <Route path="/ledger" element={<LedgerModule serverUrl={serverUrl || ''} />} />
+                    <Route path="/company" element={<CompanyModule />} />
+                    <Route path="/settings/*" element={<SettingsModule />} />
+                  </Routes>
+                </main>
+              </div>
+            </DashboardProvider>
+          </CompanyProvider>
         ) : (
           <Navigate to="/onboarding" replace />
         )

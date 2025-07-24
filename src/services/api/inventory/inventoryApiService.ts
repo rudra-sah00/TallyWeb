@@ -16,22 +16,49 @@ export interface StockItem {
 
 export interface StockItemsResponse {
   items: StockItem[];
+  totalCount: number;
+  hasMore: boolean;
+  currentPage: number;
+  pageSize: number;
+}
+
+export interface StockItemsParams {
+  page?: number;
+  pageSize?: number;
+  searchTerm?: string;
+  forceRefresh?: boolean;
+  companyName: string; // Make required - no fallback
 }
 
 class InventoryApiService extends BaseApiService {
   private xmlParser = new DOMParser();
 
-  async getStockItems(forceRefresh = false): Promise<StockItemsResponse> {
-    const cacheKey = 'stockItems';
+  async getStockItems(params: StockItemsParams): Promise<StockItemsResponse> {
+    const { 
+      page = 1, 
+      pageSize = 50, 
+      searchTerm = '', 
+      forceRefresh = false,
+      companyName
+    } = params;
+    
+    if (!companyName) {
+      throw new Error('No company selected. Please select a company first.');
+    }
+    
+    const cacheKey = `stockItems_${page}_${pageSize}_${searchTerm}`;
     
     // Check cache first unless force refresh is requested
     if (!forceRefresh) {
       const cachedData = cacheService.get<StockItemsResponse>(cacheKey);
       if (cachedData) {
-        console.log('Returning cached stock items');
+        console.log(`Returning cached stock items for page ${page}`);
         return cachedData;
       }
     }
+
+    // Calculate skip count for pagination
+    const skipCount = (page - 1) * pageSize;
 
     const xmlPayload = `
       <ENVELOPE>
@@ -45,11 +72,11 @@ class InventoryApiService extends BaseApiService {
           <DESC>
             <STATICVARIABLES>
               <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-              <SVCurrentCompany>M/S. SAHOO SANITARY (2025-26)</SVCurrentCompany>
+              <SVCurrentCompany>${companyName}</SVCurrentCompany>
             </STATICVARIABLES>
             <TDL>
               <TDLMESSAGE>
-                <COLLECTION NAME="StockItem">
+                <COLLECTION NAME="StockItem" MAXLINES="${pageSize}" SKIP="${skipCount}">
                   <TYPE>StockItem</TYPE>
                   <FETCH>NAME</FETCH>
                   <FETCH>BASEUNITS</FETCH>
@@ -59,7 +86,14 @@ class InventoryApiService extends BaseApiService {
                   <FETCH>CLOSINGVALUE</FETCH>
                   <FETCH>STANDARDCOST</FETCH>
                   <FETCH>STANDARDPRICE</FETCH>
+                  <SCROLLED>Yes</SCROLLED>
+                  ${searchTerm ? `<FILTER>StockItemFilter</FILTER>` : ''}
                 </COLLECTION>
+                ${searchTerm ? `
+                <SYSTEM TYPE="Formulae" NAME="StockItemFilter">
+                  $$StringFind:$Name:"${searchTerm}":1 > 0
+                </SYSTEM>
+                ` : ''}
               </TDLMESSAGE>
             </TDL>
           </DESC>
@@ -68,12 +102,12 @@ class InventoryApiService extends BaseApiService {
     `;
 
     try {
-      console.log('Fetching fresh stock items from API');
+      console.log(`Fetching stock items: page ${page}, pageSize ${pageSize}, search: "${searchTerm}"`);
       const responseData = await this.makeRequest(xmlPayload);
-      const result = this.parseStockItemsResponse(responseData);
+      const result = this.parseStockItemsResponse(responseData, page, pageSize, searchTerm);
       
-      // Cache the result for 10 minutes
-      cacheService.set(cacheKey, result, 10 * 60 * 1000);
+      // Cache the result for 5 minutes (shorter cache for paginated data)
+      cacheService.set(cacheKey, result, 5 * 60 * 1000);
       
       return result;
     } catch (error) {
@@ -82,10 +116,80 @@ class InventoryApiService extends BaseApiService {
     }
   }
 
-  private parseStockItemsResponse(xmlData: string): StockItemsResponse {
+  // Method to get total count of stock items (for pagination)
+  async getTotalStockItemsCount(searchTerm = '', companyName?: string): Promise<number> {
+    if (!companyName) {
+      throw new Error('No company selected. Please select a company first.');
+    }
+    
+    const cacheKey = `stockItemsCount_${searchTerm}_${companyName}`;
+    
+    const cachedCount = cacheService.get<number>(cacheKey);
+    if (cachedCount !== null) {
+      return cachedCount;
+    }
+
+    const xmlPayload = `
+      <ENVELOPE>
+        <HEADER>
+          <VERSION>1</VERSION>
+          <TALLYREQUEST>Export</TALLYREQUEST>
+          <TYPE>Collection</TYPE>
+          <ID>StockItemCount</ID>
+        </HEADER>
+        <BODY>
+          <DESC>
+            <STATICVARIABLES>
+              <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+              <SVCurrentCompany>${companyName}</SVCurrentCompany>
+            </STATICVARIABLES>
+            <TDL>
+              <TDLMESSAGE>
+                <COLLECTION NAME="StockItemCount">
+                  <TYPE>StockItem</TYPE>
+                  <FETCH>NAME</FETCH>
+                  ${searchTerm ? `<FILTER>StockItemFilter</FILTER>` : ''}
+                </COLLECTION>
+                ${searchTerm ? `
+                <SYSTEM TYPE="Formulae" NAME="StockItemFilter">
+                  $$StringFind:$Name:"${searchTerm}":1 > 0
+                </SYSTEM>
+                ` : ''}
+              </TDLMESSAGE>
+            </TDL>
+          </DESC>
+        </BODY>
+      </ENVELOPE>
+    `;
+
     try {
+      const responseData = await this.makeRequest(xmlPayload);
+      const xmlDoc = this.xmlParser.parseFromString(responseData, 'text/xml');
+      const stockItems = xmlDoc.querySelectorAll('STOCKITEM');
+      const count = stockItems.length;
+      
+      // Cache count for 10 minutes
+      cacheService.set(cacheKey, count, 10 * 60 * 1000);
+      
+      return count;
+    } catch (error) {
+      console.error('Error fetching stock items count:', error);
+      return 0;
+    }
+  }
+
+  private parseStockItemsResponse(
+    xmlData: string, 
+    page: number, 
+    pageSize: number, 
+    _searchTerm: string // Prefix with underscore to indicate intentionally unused
+  ): StockItemsResponse {
+    try {
+      console.log(`📄 Parsing XML response for stock items (page ${page})...`);
       const xmlDoc = this.xmlParser.parseFromString(xmlData, 'text/xml');
       const stockItems = xmlDoc.querySelectorAll('STOCKITEM');
+      
+      console.log(`📦 Found ${stockItems.length} STOCKITEM nodes in XML response`);
       
       const items: StockItem[] = Array.from(stockItems).map(item => {
         const name = item.getAttribute('NAME') || '';
@@ -118,9 +222,28 @@ class InventoryApiService extends BaseApiService {
         };
       }).filter(item => item.name); // Filter out empty names
 
-      return { items };
+      console.log(`✅ Successfully parsed ${items.length} valid stock items (filtered out ${stockItems.length - items.length} empty items)`);
+      console.log(`📊 Stock items summary:`, {
+        totalParsed: items.length,
+        withClosingBalance: items.filter(item => item.closingBalance && parseFloat(item.closingBalance.replace(/[^\d.-]/g, '')) > 0).length,
+        withValue: items.filter(item => item.closingValue && parseFloat(item.closingValue.replace(/[^\d.-]/g, '')) !== 0).length,
+        sampleItems: items.slice(0, 3).map(item => ({ name: item.name, balance: item.closingBalance, value: item.closingValue }))
+      });
+
+      // For now, we'll estimate totalCount. In a real implementation, 
+      // you might need a separate API call to get the exact count
+      const hasMore = items.length === pageSize;
+      const estimatedTotalCount = hasMore ? (page * pageSize) + 1 : (page - 1) * pageSize + items.length;
+
+      return { 
+        items,
+        totalCount: estimatedTotalCount,
+        hasMore,
+        currentPage: page,
+        pageSize
+      };
     } catch (error) {
-      console.error('Error parsing stock items XML:', error);
+      console.error('❌ Error parsing stock items XML:', error);
       throw new Error('Failed to parse stock items data');
     }
   }

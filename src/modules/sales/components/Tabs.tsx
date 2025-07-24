@@ -32,7 +32,7 @@ interface TabsListProps {
 
 export const TabsList: React.FC<TabsListProps> = ({ className, children }) => {
   return (
-    <div className={`flex space-x-1 rounded-lg bg-gray-100 p-1 mb-6 ${className}`}>
+    <div className={`flex space-x-1 rounded-lg bg-gray-100 p-1 mb-6 h-16 ${className}`}>
       {children}
     </div>
   );
@@ -41,9 +41,10 @@ export const TabsList: React.FC<TabsListProps> = ({ className, children }) => {
 interface TabsTriggerProps {
   value: string;
   children: React.ReactNode;
+  icon?: React.ComponentType<any>;
 }
 
-export const TabsTrigger: React.FC<TabsTriggerProps> = ({ value, children }) => {
+export const TabsTrigger: React.FC<TabsTriggerProps> = ({ value, children, icon: Icon }) => {
   const context = useContext(TabsContext);
   if (!context) throw new Error('TabsTrigger must be used within Tabs');
 
@@ -53,12 +54,13 @@ export const TabsTrigger: React.FC<TabsTriggerProps> = ({ value, children }) => 
   return (
     <button
       onClick={() => setActiveTab(value)}
-      className={`flex-1 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+      className={`flex-1 px-6 py-4 text-base font-medium rounded-md transition-colors flex items-center justify-center gap-2 ${
         isActive
           ? 'bg-white text-blue-600 shadow-sm'
           : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
       }`}
     >
+      {Icon && <Icon className="w-5 h-5" />}
       {children}
     </button>
   );

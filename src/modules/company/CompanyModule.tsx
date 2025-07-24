@@ -4,10 +4,12 @@ import { Building2, TrendingUp, TrendingDown, RefreshCw, Calendar, DollarSign, P
 import CompanyApiService, { type TallyCompanyDetails } from '../../services/api/company/companyApiService';
 import { balanceSheetApiService, type BalanceSheetData } from '../../services/api/balanceSheetApiService';
 import { cacheService } from '../../services/cacheService';
+import { useCompany } from '../../context/CompanyContext';
 import AnalyticsView from './components/AnalyticsView';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './components/Tabs';
 
 const CompanyModule: React.FC = () => {
+  const { selectedCompany, serverUrl } = useCompany();
   const [companyDetails, setCompanyDetails] = useState<TallyCompanyDetails | null>(null);
   const [balanceSheet, setBalanceSheet] = useState<BalanceSheetData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -55,21 +57,35 @@ const CompanyModule: React.FC = () => {
 
   const companyApiService = new CompanyApiService();
 
+  // Configure API service with server URL
   useEffect(() => {
-    loadCompanyDetails();
-    loadBalanceSheet(); // Load balance sheet data initially
-  }, []);
+    if (serverUrl) {
+      companyApiService.setBaseURL(`http://${serverUrl}`);
+      balanceSheetApiService.setBaseURL(`http://${serverUrl}`);
+    }
+  }, [serverUrl]);
+
+  useEffect(() => {
+    if (selectedCompany) {
+      loadCompanyDetails();
+      loadBalanceSheet(); // Load balance sheet data initially
+    }
+  }, [selectedCompany]);
 
   useEffect(() => {
     loadBalanceSheet();
   }, [fromDate, toDate]);
 
   const loadCompanyDetails = async () => {
+    if (!selectedCompany) {
+      setError('No company selected');
+      return;
+    }
+    
     setLoading(true);
     setError(null);
     try {
-      // For now, using a default company name. You can modify this to use dynamic company selection
-      const details = await companyApiService.getCompanyDetails('M/S. SAHOO SANITARY (2025-26)');
+      const details = await companyApiService.getCompanyDetails(selectedCompany);
       setCompanyDetails(details);
     } catch (error) {
       console.error('Error loading company details:', error);
@@ -100,7 +116,7 @@ const CompanyModule: React.FC = () => {
       const data = await balanceSheetApiService.getBalanceSheet(
         formattedFromDate, 
         formattedToDate,
-        'M/S. SAHOO SANITARY (2025-26)'
+        selectedCompany
       );
       
       console.log('Balance Sheet Data loaded:', data);
@@ -138,7 +154,9 @@ const CompanyModule: React.FC = () => {
     <div className="p-6 space-y-6">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800">Company Management</h1>
-        <p className="text-gray-600 mt-2">Comprehensive financial analysis and business insights for M/S. SAHOO SANITARY</p>
+        <p className="text-gray-600 mt-2">
+          Comprehensive financial analysis and business insights for {selectedCompany || 'your company'}
+        </p>
       </div>
 
       {/* Error Display */}
