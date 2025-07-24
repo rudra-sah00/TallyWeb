@@ -1,9 +1,9 @@
 import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
-import { generateDummyData, DashboardData } from '../utils/dummyData';
+import { DashboardData } from '../utils/dummyData';
 import DashboardApiService from '../services/api/dashboardApiService';
 
 interface DashboardContextType {
-  data: DashboardData;
+  data: DashboardData | null;
   loading: boolean;
   error: string | null;
   refreshData: () => Promise<void>;
@@ -21,7 +21,7 @@ export const DashboardProvider: React.FC<{
   selectedCompany,
   serverUrl
 }) => {
-  const [data, setData] = useState<DashboardData>(generateDummyData());
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,11 +53,56 @@ export const DashboardProvider: React.FC<{
         selectedCompany
       );
 
-      // Update data with real financial overview while keeping dummy data for other sections
-      setData(prevData => ({
-        ...prevData,
-        overview: financialOverview
-      }));
+      // Update data with real financial overview
+      setData(prevData => {
+        if (!prevData) {
+          // If no previous data, create a minimal structure
+          return {
+            overview: financialOverview,
+            cashBank: {
+              cashInHand: 0,
+              bankBalance: 0,
+              receivables: 0,
+              payables: 0,
+              recentChanges: { cash: '+0%', bank: '+0%', receivables: '+0%', payables: '+0%' }
+            },
+            outstanding: { receivable: [], payable: [] },
+            expenses: { recentEntries: [], monthlyTrend: { labels: [], data: [] } },
+            sales: { 
+              monthlyTrend: { labels: [], data: [] },
+              topCustomers: [],
+              recentTransactions: [],
+              analytics: { totalRevenue: 0, activeCustomers: 0, averageOrderValue: 0, conversionRate: 0 }
+            },
+            purchases: { 
+              monthlyTrend: { labels: [], data: [] },
+              topSuppliers: [],
+              recentTransactions: [],
+              analytics: { totalSpend: 0, activeSuppliers: 0, averageOrderValue: 0, qualityScore: 0 }
+            },
+            stock: {
+              closingStockValue: 0,
+              lowStockCount: 0,
+              categories: [],
+              itemLevels: [],
+              movements: [],
+              alerts: { critical: [], low: [] }
+            },
+            quickStats: {
+              overdueBills: 0,
+              lowStockAlerts: 0,
+              paymentsDue: 0,
+              gstDueDate: ''
+            },
+            gst: { pendingReturns: [], recentPayments: [] },
+            recentActivity: []
+          };
+        }
+        return {
+          ...prevData,
+          overview: financialOverview
+        };
+      });
 
     } catch (err) {
       console.error('Failed to fetch financial data from Tally:', err);
