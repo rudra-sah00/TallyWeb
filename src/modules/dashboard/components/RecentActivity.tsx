@@ -4,7 +4,33 @@ import { useDashboardContext } from '../../../context/DashboardContext';
 import { formatCurrency } from '../../../shared/utils/formatters';
 
 const RecentActivity: React.FC = () => {
-  const { data } = useDashboardContext();
+  const { data, loading } = useDashboardContext();
+
+  // Show loading state or return empty if data not available
+  if (loading || !data || !data.sales || !data.purchases || !data.expenses) {
+    return (
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 animate-pulse">
+        <div className="w-48 h-6 bg-gray-200 rounded mb-6"></div>
+        <div className="space-y-4">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className="flex items-center justify-between p-4 rounded-lg border border-gray-100">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-gray-200 rounded-lg"></div>
+                <div>
+                  <div className="w-32 h-4 bg-gray-200 rounded mb-1"></div>
+                  <div className="w-20 h-3 bg-gray-200 rounded"></div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="w-16 h-4 bg-gray-200 rounded mb-1"></div>
+                <div className="w-12 h-3 bg-gray-200 rounded"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   // Combine recent activities from different modules
   const recentActivities = [

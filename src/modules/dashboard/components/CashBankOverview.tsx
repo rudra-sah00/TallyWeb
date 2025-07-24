@@ -4,7 +4,28 @@ import { useDashboardContext } from '../../../context/DashboardContext';
 import { formatCurrency } from '../../../shared/utils/formatters';
 
 const CashBankOverview: React.FC = () => {
-  const { data } = useDashboardContext();
+  const { data, loading } = useDashboardContext();
+
+  // Show loading state or return empty if data not available
+  if (loading || !data || !data.cashBank) {
+    return (
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 animate-pulse">
+        <div className="w-48 h-6 bg-gray-200 rounded mb-6"></div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="p-4 rounded-lg border border-gray-100">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-10 h-10 bg-gray-200 rounded-lg"></div>
+                <div className="w-12 h-3 bg-gray-200 rounded"></div>
+              </div>
+              <div className="w-20 h-3 bg-gray-200 rounded mb-1"></div>
+              <div className="w-24 h-5 bg-gray-200 rounded"></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   const items = [
     {

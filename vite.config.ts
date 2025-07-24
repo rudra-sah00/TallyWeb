@@ -10,7 +10,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/tally': {
-        target: 'http://192.168.1.2:9000',
+        target: 'http://192.168.31.119:9000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/tally/, ''),
       }

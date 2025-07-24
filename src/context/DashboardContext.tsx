@@ -1,5 +1,5 @@
 import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
-import { DashboardData } from '../utils/dummyData';
+import { DashboardData, generateDummyData } from '../utils/dummyData';
 import DashboardApiService from '../services/api/dashboardApiService';
 
 interface DashboardContextType {
@@ -21,7 +21,7 @@ export const DashboardProvider: React.FC<{
   selectedCompany,
   serverUrl
 }) => {
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [data, setData] = useState<DashboardData | null>(generateDummyData());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

@@ -3,7 +3,27 @@ import { AlertTriangle, CheckCircle, Clock, TrendingUp } from 'lucide-react';
 import { useDashboardContext } from '../../../context/DashboardContext';
 
 const QuickStats: React.FC = () => {
-  const { data } = useDashboardContext();
+  const { data, loading } = useDashboardContext();
+
+  // Show loading state or return empty if data not available
+  if (loading || !data || !data.outstanding || !data.stock || !data.sales) {
+    return (
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 animate-pulse">
+        <div className="w-32 h-6 bg-gray-200 rounded mb-6"></div>
+        <div className="grid grid-cols-2 gap-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="p-4 rounded-lg border border-gray-100">
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-8 h-8 bg-gray-200 rounded-lg"></div>
+              </div>
+              <div className="w-16 h-3 bg-gray-200 rounded mb-1"></div>
+              <div className="w-8 h-5 bg-gray-200 rounded"></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   const stats = [
     {
