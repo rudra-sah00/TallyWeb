@@ -82,21 +82,12 @@ const InventoryModule: React.FC = () => {
     setError(null);
     
     try {
-      console.log(`🔄 Loading stock items... (page: ${page}, search: "${search}", forceRefresh: ${forceRefresh})`);
       const response: StockItemsResponse = await inventoryApiService.getStockItems({
         page,
         pageSize,
         searchTerm: search,
         forceRefresh,
         companyName: selectedCompany
-      });
-      
-      console.log(`📦 Received ${response.items.length} stock items from API`);
-      console.log(`📊 Pagination info:`, {
-        currentPage: response.currentPage,
-        totalCount: response.totalCount,
-        hasMore: response.hasMore,
-        pageSize: response.pageSize
       });
       
       if (page === 1) {
@@ -116,7 +107,6 @@ const InventoryModule: React.FC = () => {
         setAnalytics(null);
       }
     } catch (error) {
-      console.error('❌ Error loading stock items:', error);
       setError(error instanceof Error ? error.message : 'Failed to load stock items');
     } finally {
       setLoading(false);
@@ -126,23 +116,13 @@ const InventoryModule: React.FC = () => {
 
   const generateAnalytics = () => {
     if (stockItems.length === 0) {
-      console.log('❌ No stock items available for analytics');
       return;
     }
     
-    console.log(`📊 Generating analytics for ${stockItems.length} items...`);
     try {
       const analyticsData = stockAnalyticsService.generateAnalytics(stockItems);
-      console.log('✅ Analytics generated:', {
-        totalItems: analyticsData.totalItems,
-        topValueItemsCount: analyticsData.topValueItems.length,
-        lowStockItemsCount: analyticsData.lowStockItems.length,
-        zeroStockItemsCount: analyticsData.zeroStockItems.length,
-        totalValue: analyticsData.totalValue
-      });
       setAnalytics(analyticsData);
     } catch (error) {
-      console.error('❌ Error generating analytics:', error);
       setError('Failed to generate analytics');
     }
   };

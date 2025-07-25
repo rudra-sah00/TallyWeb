@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useCompany } from '../../context/CompanyContext';
 import SalesApiService, { SalesVoucher, DateRangeOption } from '../../services/api/sales/salesApiService';
-import SimpleVoucherModal from './components/SimpleVoucherModal';
+import { SimpleVoucherModal } from './components/SimpleVoucherModal';
 import SalesOverview from './components/SalesOverview';
 import SalesAnalytics from './components/SalesAnalytics';
 import SalesComparison from './components/SalesComparison';
@@ -30,6 +30,7 @@ const SalesModule: React.FC = () => {
   // Modal state for voucher details
   const [selectedVoucherGuid, setSelectedVoucherGuid] = useState<string>('');
   const [selectedVoucherNumber, setSelectedVoucherNumber] = useState<string>('');
+  const [selectedVoucherData, setSelectedVoucherData] = useState<SalesVoucher | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const salesApi = new SalesApiService();
@@ -45,7 +46,7 @@ const SalesModule: React.FC = () => {
       setCurrentLoading(true);
       setError(null);
       
-      // This now fetches Day Book data with all details and caches it automatically
+      // Fetch the sales vouchers list 
       const vouchers = await salesApi.getSalesVouchers(selectedCompany, 'currentMonth');
       setCurrentSalesVouchers(vouchers);
       
@@ -108,6 +109,7 @@ const SalesModule: React.FC = () => {
   const handleVoucherClick = (voucher: SalesVoucher) => {
     setSelectedVoucherGuid(voucher.guid);
     setSelectedVoucherNumber(voucher.voucherNumber);
+    setSelectedVoucherData(voucher); // Store the complete voucher data
     setIsModalOpen(true);
   };
 
@@ -115,6 +117,7 @@ const SalesModule: React.FC = () => {
     setIsModalOpen(false);
     setSelectedVoucherGuid('');
     setSelectedVoucherNumber('');
+    setSelectedVoucherData(null); // Clear the voucher data
   };
 
   // Handle date range change from overview tab
@@ -125,7 +128,7 @@ const SalesModule: React.FC = () => {
       setCurrentLoading(true);
       setError(null);
       
-      // This now fetches Day Book data with all details and caches it automatically
+      // Fetch sales vouchers for the selected date range
       const vouchers = await salesApi.getSalesVouchers(selectedCompany, dateRange, customFrom, customTo);
       setCurrentSalesVouchers(vouchers);
       
@@ -283,6 +286,7 @@ const SalesModule: React.FC = () => {
             onClose={handleCloseModal}
             voucherGuid={selectedVoucherGuid}
             voucherNumber={selectedVoucherNumber}
+            voucherData={selectedVoucherData}
           />
         </div>
       </div>

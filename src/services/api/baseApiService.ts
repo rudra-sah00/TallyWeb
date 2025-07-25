@@ -23,11 +23,9 @@ export default class BaseApiService {
     if (this.isDevelopment) {
       // In development, always use proxy endpoint to avoid CORS
       this.baseURL = '/api/tally';
-      console.log('Development mode: Using proxy /api/tally for URL:', url);
     } else {
       // Production mode, use direct URL
       this.baseURL = url;
-      console.log('Production mode: BaseAPI URL set to:', this.baseURL);
     }
   }
 
@@ -47,8 +45,6 @@ export default class BaseApiService {
         throw new Error('Server configuration not available. Please configure server settings first.');
       }
       
-      console.log('Making request to:', this.baseURL);
-      
       const requestOptions: RequestInit = {
         method: 'POST',
         headers: { 
@@ -66,13 +62,10 @@ export default class BaseApiService {
       
       if (this.isDevelopment) {
         // In development, we're using the Vite proxy
-        console.log('Using Vite proxy /api/tally');
-        // No need to set CORS mode as it's same-origin request to proxy
       } else {
         // For production direct connections, use CORS mode
         if (this.baseURL.startsWith('http://')) {
           requestOptions.mode = 'cors';
-          console.log('Using CORS mode for direct Tally request to:', requestUrl);
         }
       }
 
@@ -104,9 +97,6 @@ export default class BaseApiService {
 
       const responseText = await response.text();
       
-      console.log(`📊 Response received: ${responseText.length} characters`);
-      console.log(`📊 Response preview (first 200 chars):`, responseText.substring(0, 200));
-      
       // Check for Tally errors in the response body
       if (responseText.includes("Could not set 'SVCurrentCompany'")) {
         const companyMatch = responseText.match(/'([^']+)'/);
@@ -116,8 +106,6 @@ export default class BaseApiService {
 
       return responseText;
     } catch (error) {
-      console.error('Tally API request failed:', error);
-      
       // Provide more specific error messages
       if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
         throw new Error(`CORS Error: Failed to connect to server ${this.baseURL}. 

@@ -52,7 +52,6 @@ class InventoryApiService extends BaseApiService {
     if (!forceRefresh) {
       const cachedData = cacheService.get<StockItemsResponse>(cacheKey);
       if (cachedData) {
-        console.log(`Returning cached stock items for page ${page}`);
         return cachedData;
       }
     }
@@ -102,7 +101,6 @@ class InventoryApiService extends BaseApiService {
     `;
 
     try {
-      console.log(`Fetching stock items: page ${page}, pageSize ${pageSize}, search: "${searchTerm}"`);
       const responseData = await this.makeRequest(xmlPayload);
       const result = this.parseStockItemsResponse(responseData, page, pageSize, searchTerm);
       
@@ -185,11 +183,8 @@ class InventoryApiService extends BaseApiService {
     _searchTerm: string // Prefix with underscore to indicate intentionally unused
   ): StockItemsResponse {
     try {
-      console.log(`📄 Parsing XML response for stock items (page ${page})...`);
       const xmlDoc = this.xmlParser.parseFromString(xmlData, 'text/xml');
       const stockItems = xmlDoc.querySelectorAll('STOCKITEM');
-      
-      console.log(`📦 Found ${stockItems.length} STOCKITEM nodes in XML response`);
       
       const items: StockItem[] = Array.from(stockItems).map(item => {
         const name = item.getAttribute('NAME') || '';
@@ -221,14 +216,6 @@ class InventoryApiService extends BaseApiService {
           languageName: languageName.trim() || undefined
         };
       }).filter(item => item.name); // Filter out empty names
-
-      console.log(`✅ Successfully parsed ${items.length} valid stock items (filtered out ${stockItems.length - items.length} empty items)`);
-      console.log(`📊 Stock items summary:`, {
-        totalParsed: items.length,
-        withClosingBalance: items.filter(item => item.closingBalance && parseFloat(item.closingBalance.replace(/[^\d.-]/g, '')) > 0).length,
-        withValue: items.filter(item => item.closingValue && parseFloat(item.closingValue.replace(/[^\d.-]/g, '')) !== 0).length,
-        sampleItems: items.slice(0, 3).map(item => ({ name: item.name, balance: item.closingBalance, value: item.closingValue }))
-      });
 
       // For now, we'll estimate totalCount. In a real implementation, 
       // you might need a separate API call to get the exact count

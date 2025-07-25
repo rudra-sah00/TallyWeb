@@ -33,7 +33,6 @@ const CompanySelection: React.FC<CompanySelectionProps> = ({ onCompanySelect }) 
       
       // Update the base URL in the API service
       const currentServer = getCurrentServerUrl();
-      console.log('Fetching companies from server:', currentServer);
       companyApi.setBaseURL(`http://${currentServer}`);
       
       const companyList = await companyApi.getCompanyList();
@@ -45,7 +44,6 @@ const CompanySelection: React.FC<CompanySelectionProps> = ({ onCompanySelect }) 
         setStep('company');
       }
     } catch (err) {
-      console.error('Company fetch error:', err);
       let errorMessage = 'Failed to connect to Tally server';
       
       if (err instanceof Error) {

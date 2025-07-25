@@ -38,7 +38,6 @@ export default class DashboardApiService extends BaseApiService {
 
     try {
       const xmlText = await this.makeRequest(xmlRequest);
-      console.log('Cash Balance XML Response:', xmlText);
       
       const xmlDoc = this.parseXML(xmlText);
       const closingBalance = xmlDoc.querySelector('CLOSINGBALANCE')?.textContent || '0';
@@ -74,7 +73,6 @@ export default class DashboardApiService extends BaseApiService {
 
     try {
       const xmlText = await this.makeRequest(xmlRequest);
-      console.log('Bank Balance XML Response:', xmlText);
       
       const xmlDoc = this.parseXML(xmlText);
       const closingBalance = xmlDoc.querySelector('CLOSINGBALANCE')?.textContent || '0';
@@ -119,7 +117,6 @@ export default class DashboardApiService extends BaseApiService {
 
     try {
       const xmlText = await this.makeRequest(xmlRequest);
-      console.log('Sales Vouchers XML Response:', xmlText);
       
       const xmlDoc = this.parseXML(xmlText);
       let totalSales = 0;
@@ -171,7 +168,6 @@ export default class DashboardApiService extends BaseApiService {
 
     try {
       const xmlText = await this.makeRequest(xmlRequest);
-      console.log('Purchase Vouchers XML Response:', xmlText);
       
       const xmlDoc = this.parseXML(xmlText);
       let totalPurchases = 0;
@@ -223,7 +219,6 @@ export default class DashboardApiService extends BaseApiService {
 
     try {
       const xmlText = await this.makeRequest(xmlRequest);
-      console.log('Expense Vouchers XML Response:', xmlText);
       
       const xmlDoc = this.parseXML(xmlText);
       let totalExpenses = 0;
@@ -244,7 +239,6 @@ export default class DashboardApiService extends BaseApiService {
   // Get comprehensive financial overview using all APIs
   async getFinancialOverview(fromDate: string, toDate: string, company: string): Promise<FinancialOverview> {
     try {
-      console.log('Fetching financial overview from Tally APIs...');
       
       // Fetch all data in parallel
       const [cashBalance, bankBalance, totalSales, totalPurchases, totalExpenses] = await Promise.all([
@@ -268,7 +262,6 @@ export default class DashboardApiService extends BaseApiService {
         cashBank
       };
 
-      console.log('Financial Overview:', overview);
       return overview;
     } catch (error) {
       console.error('Failed to fetch financial overview:', error);

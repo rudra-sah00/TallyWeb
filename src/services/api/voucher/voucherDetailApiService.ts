@@ -97,11 +97,9 @@ export class VoucherDetailApiService extends BaseApiService {
 </ENVELOPE>`;
 
     try {
-      console.log(`🔍 Fetching voucher details for GUID: ${voucherGuid}`);
       const response = await this.makeRequest(xmlRequest);
       
       const result = this.parseVoucherDetailsResponse(response);
-      console.log(`✅ Successfully parsed voucher details for ${result.voucherNumber}`);
       
       return result;
     } catch (error) {
@@ -115,7 +113,6 @@ export class VoucherDetailApiService extends BaseApiService {
    */
   private parseVoucherDetailsResponse(xmlText: string): VoucherDetail {
     try {
-      console.log('🔍 Parsing voucher details XML...');
       
       // Clean XML to remove invalid characters
       const cleanedXml = this.cleanXmlForParsing(xmlText);

@@ -37,13 +37,11 @@ const LedgerModule: React.FC<LedgerModuleProps> = ({ serverUrl }) => {
 
     try {
       setIsInitialLoading(true);
-      console.log('Fetching ledgers for company:', selectedCompany);
       
       const ledgers = await ledgerApi.getLedgerList(selectedCompany);
       setCachedLedgers(ledgers);
       setLastFetchTime(Date.now());
       
-      console.log(`Cached ${ledgers.length} ledgers`);
     } catch (error) {
       console.error('Failed to fetch ledgers:', error);
       // Don't clear cache on error, keep existing data if available
@@ -61,7 +59,6 @@ const LedgerModule: React.FC<LedgerModuleProps> = ({ serverUrl }) => {
   };
 
   const handleRefreshLedgers = () => {
-    console.log('Manual refresh requested');
     fetchLedgers();
   };
 

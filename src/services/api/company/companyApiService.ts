@@ -25,6 +25,28 @@ export interface TallyCompanyDetails {
   stateName: string;
   booksFrom: string;
   mailingName: string[];
+  pan?: string;
+  gstin?: string;
+  contactPerson?: string;
+  contactNumber?: string;
+  bankNames?: string[];
+  tradeName?: string;
+  formalName?: string;
+  mobileNumbers?: string[];
+  faxNumber?: string;
+  website?: string;
+  adminEmail?: string;
+  companyChequeName?: string;
+  gstRegistrationType?: string;
+  typeOfSupply?: string;
+  smsName?: string;
+  vattinNumber?: string;
+  interstateStNumber?: string;
+  authorisedPerson?: string;
+  authorisedPersonDesignation?: string;
+  udfFields?: Record<string, string | string[]>;
+  chequeBankDetails?: Array<Record<string, string>>;
+  [key: string]: any;
 }
 
 export default class CompanyApiService extends BaseApiService {
@@ -57,7 +79,6 @@ export default class CompanyApiService extends BaseApiService {
 
     try {
       const xmlText = await this.makeRequest(xmlRequest);
-      console.log('Company List XML Response:', xmlText);
       
       const xmlDoc = this.parseXML(xmlText);
       const companies: TallyCompany[] = [];
@@ -93,7 +114,6 @@ export default class CompanyApiService extends BaseApiService {
         });
       }
 
-      console.log('Parsed Companies:', companies);
       return companies;
     } catch (error) {
       console.error('Failed to fetch company list:', error);
@@ -117,18 +137,7 @@ export default class CompanyApiService extends BaseApiService {
         <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
       </STATICVARIABLES>
       <FETCHLIST>
-        <FETCH>Name</FETCH>
-        <FETCH>GUID</FETCH>
-        <FETCH>MAILINGNAME.LIST</FETCH>
-        <FETCH>ADDRESS.LIST</FETCH>
-        <FETCH>PHONE</FETCH>
-        <FETCH>EMAIL</FETCH>
-        <FETCH>COUNTRYNAME</FETCH>
-        <FETCH>STATENAME</FETCH>
-        <FETCH>PINCODE</FETCH>
-        <FETCH>BOOKSFROM</FETCH>
-        <FETCH>PARTYGSTIN</FETCH>
-        <FETCH>PAN</FETCH>
+        <FETCH>*</FETCH>
       </FETCHLIST>
     </DESC>
   </BODY>
@@ -136,52 +145,131 @@ export default class CompanyApiService extends BaseApiService {
 
     try {
       const response = await this.makeRequest(xmlRequest);
-      console.log('Company Details XML Response:', response);
-      const xmlDoc = this.parseXML(response);
-      
-      // Updated parsing logic to match the actual XML structure
-      const companyElement = xmlDoc.querySelector('TALLYMESSAGE COMPANY') || xmlDoc.querySelector('COMPANY');
-      if (!companyElement) {
-        console.log('No COMPANY element found in XML');
-        return null;
+      // Debug: log the raw XML response
+      if (typeof window !== 'undefined') {
+        console.log('RAW COMPANY XML:', response);
+      } else {
+        // eslint-disable-next-line no-console
+        console.log('RAW COMPANY XML:', response);
       }
-
-      const getElementText = (elementName: string): string => {
-        const element = companyElement.querySelector(elementName);
-        return element?.textContent?.trim() || '';
+      const xmlDoc = this.parseXML(response);
+      const companyElement = xmlDoc.querySelector('TALLYMESSAGE COMPANY') || xmlDoc.querySelector('COMPANY');
+      if (!companyElement) return null;
+      // Helper to convert XML tag to lowerCamelCase
+      const toCamel = (str: string) => {
+        // Remove dots, underscores, hyphens, and convert to lowerCamelCase
+        return str
+          .toLowerCase()
+          .replace(/[-_\.]+(.)?/g, (_, c) => c ? c.toUpperCase() : '')
+          .replace(/^([a-z])/, (m) => m.toLowerCase());
       };
-
-      // Parse the address list properly
-      const addressElements = companyElement.querySelectorAll('ADDRESS\\.LIST ADDRESS');
-      const addresses: string[] = [];
-      addressElements.forEach(addr => {
-        const text = addr.textContent?.trim();
-        if (text) addresses.push(text);
+      // Helper to parse .LIST as array
+      const parseList = (node: Element) => Array.from(node.children).map(child => child.textContent?.trim() || '').filter(Boolean);
+      // Helper to parse .LIST of objects
+      const parseListOfObjects = (node: Element) => Array.from(node.children).map(child => {
+        const obj: Record<string, string> = {};
+        Array.from(child.children).forEach(grandchild => {
+          obj[toCamel(grandchild.nodeName)] = grandchild.textContent?.trim() || '';
+        });
+        return obj;
       });
-
-      // Parse mailing names if available
-      const mailingElements = companyElement.querySelectorAll('MAILINGNAME\\.LIST MAILINGNAME');
-      const mailingNames: string[] = [];
-      mailingElements.forEach(name => {
-        const text = name.textContent?.trim();
-        if (text) mailingNames.push(text);
+      // Parse all direct children
+      const details: Record<string, any> = {};
+      Array.from(companyElement.children).forEach(child => {
+        const key = toCamel(child.nodeName);
+        if (child.nodeName.endsWith('.LIST')) {
+          // If children are objects, parse as array of objects
+          if (Array.from(child.children).some(grandchild => grandchild.children.length > 0)) {
+            details[key] = parseListOfObjects(child);
+          } else {
+            details[key] = parseList(child);
+          }
+        } else {
+          details[key] = child.textContent?.trim() || '';
+        }
       });
-
-      const companyDetails = {
-        name: getElementText('NAME'),
-        guid: getElementText('GUID'),
-        email: getElementText('EMAIL'),
-        phone: getElementText('PHONE'),
-        address: addresses,
-        pincode: getElementText('PINCODE'),
-        countryName: getElementText('COUNTRYNAME'),
-        stateName: getElementText('STATENAME'),
-        booksFrom: getElementText('BOOKSFROM'),
-        mailingName: mailingNames
-      };
-
-      console.log('Parsed Company Details:', companyDetails);
-      return companyDetails;
+      // --- Enhancement: Map Tally XML fields to expected UI fields robustly ---
+      // Address
+      if (companyElement.querySelector('ADDRESS.LIST')) {
+        details.address = Array.from(companyElement.querySelectorAll('ADDRESS.LIST > ADDRESS')).map(e => e.textContent?.trim() || '').filter(Boolean);
+      } else {
+        details.address = details['address'] || details['addressList'] || details['address.lIST'] || details['address.LIST'] || details['ADDRESS.LIST'] || [];
+        if (!Array.isArray(details.address)) details.address = [details.address].filter(Boolean);
+      }
+      // Mailing Name
+      if (companyElement.querySelector('MAILINGNAME')) {
+        details.mailingName = Array.from(companyElement.querySelectorAll('MAILINGNAME')).map(e => e.textContent?.trim() || '').filter(Boolean);
+      } else {
+        details.mailingName = details['mailingName'] || details['mailingNameList'] || details['mailingname'] || details['mailingnameList'] || details['mailingname.lIST'] || details['mailingname.LIST'] || details['MAILINGNAME'] || [];
+        if (!Array.isArray(details.mailingName)) details.mailingName = [details.mailingName].filter(Boolean);
+      }
+      // Bank Names
+      details.bankNames = details['companychequebanksList'] ? details['companychequebanksList'].map((b: any) => b.companychequebanks).filter(Boolean) : [];
+      // Mobile Numbers
+      if (companyElement.querySelector('MOBILENUMBERS.LIST')) {
+        details.mobileNumbers = Array.from(companyElement.querySelectorAll('MOBILENUMBERS.LIST > MOBILENUMBERS')).map(e => e.textContent?.trim() || '').filter(Boolean);
+      } else {
+        details.mobileNumbers = details['mobilenumbers'] || details['mobilenumbersList'] || details['mobilenumbers.lIST'] || details['mobilenumbers.LIST'] || details['MOBILENUMBERS.LIST'] || [];
+        if (!Array.isArray(details.mobileNumbers)) details.mobileNumbers = [details.mobileNumbers].filter(Boolean);
+      }
+      // Name
+      details.name = details['name'] || companyElement.getAttribute('NAME') || '';
+      // Formal Name
+      details.formalName = details['basiccompanyformalname'] || details['formalName'] || details['BASICCOMPANYFORMALNAME'] || '';
+      // Trade Name
+      details.tradeName = details['cmptradename'] || details['tradeName'] || details['CMPTRADENAME'] || '';
+      // Admin Email
+      details.adminEmail = details['adminemailid'] || details['adminEmail'] || details['ADMINEMAILID'] || '';
+      // Company Cheque Name
+      details.companyChequeName = details['companychequename'] || details['companyChequeName'] || details['COMPANYCHEQUENAME'] || '';
+      // GST Registration Type
+      details.gstRegistrationType = details['gstregistrationtype'] || details['gstRegistrationType'] || details['GSTREGISTRATIONTYPE'] || '';
+      // Type of Supply
+      details.typeOfSupply = details['cmptypeofsupply'] || details['typeOfSupply'] || details['CMPTYPEOFSUPPLY'] || '';
+      // PAN
+      details.pan = details['incometaxnumber'] || details['pan'] || details['INCOMETAXNUMBER'] || '';
+      // GSTIN
+      details.gstin = details['gstregistrationnumber'] || details['gstin'] || details['GSTREGISTRATIONNUMBER'] || '';
+      // Contact Person
+      details.contactPerson = details['companycontactperson'] || details['contactPerson'] || details['COMPANYCONTACTPERSON'] || '';
+      // Contact Number
+      details.contactNumber = details['companycontactnumber'] || details['contactNumber'] || details['COMPANYCONTACTNUMBER'] || '';
+      // SMS Name
+      details.smsName = details['companysmsname'] || details['smsName'] || details['COMPANYSMSNAME'] || '';
+      // VAT TIN
+      details.vattinNumber = details['vattinnumber'] || details['vattinNumber'] || details['VATTINNUMBER'] || '';
+      // Interstate ST Number
+      details.interstateStNumber = details['interstatestnumber'] || details['interstateStNumber'] || details['INTERSTATESTNUMBER'] || '';
+      // Authorised Person
+      details.authorisedPerson = details['cmpauthpersnname'] || details['authorisedPerson'] || details['CMPAUTHPERSNNAME'] || '';
+      // Authorised Person Designation
+      details.authorisedPersonDesignation = details['cmpauthpersndesgnation'] || details['authorisedPersonDesignation'] || details['CMPAUTHPERSNDESGNATION'] || '';
+      // Books From
+      details.booksFrom = details['booksfrom'] || details['booksFrom'] || details['BOOKSFROM'] || '';
+      // State Name
+      details.stateName = details['statename'] || details['stateName'] || details['priorstatename'] || details['STATENAME'] || '';
+      // Country Name
+      details.countryName = details['countryname'] || details['countryName'] || details['COUNTRYNAME'] || '';
+      // Pincode
+      details.pincode = details['pincode'] || details['PINCODE'] || '';
+      // Email
+      details.email = details['email'] || details['EMAIL'] || '';
+      // Phone
+      details.phone = details['phonenumber'] || details['phone'] || '';
+      // Fax Number
+      details.faxNumber = details['faxnumber'] || details['CMPFAXNUMBER'] || '';
+      // Website
+      details.website = details['website'] || '';
+      // UDF Fields (custom fields)
+      details.udfFields = Object.fromEntries(Object.entries(details).filter(([k]) => k.startsWith('udf')));
+      // Debug: log the parsed details object
+      if (typeof window !== 'undefined') {
+        console.log('DEBUG: Parsed company details', details);
+      } else {
+        // eslint-disable-next-line no-console
+        console.log('DEBUG: Parsed company details', details);
+      }
+      return details as TallyCompanyDetails;
     } catch (error) {
       console.error('Failed to fetch company details:', error);
       throw error;
@@ -217,7 +305,6 @@ export default class CompanyApiService extends BaseApiService {
 
     try {
       const response = await this.makeRequest(xmlRequest);
-      console.log('Company Tax Details XML Response:', response);
       const xmlDoc = this.parseXML(response);
       
       // Updated parsing logic to match the actual XML structure
@@ -226,14 +313,12 @@ export default class CompanyApiService extends BaseApiService {
                             xmlDoc.querySelector('COMPANY');
       
       if (!companyElement) {
-        console.log('No COMPANY element found in Tax XML');
         return null;
       }
 
       const getElementText = (elementName: string): string => {
         const element = companyElement.querySelector(elementName);
         const value = element?.textContent?.trim() || '';
-        console.log(`Tax - ${elementName}: ${value}`);
         return value;
       };
 
@@ -243,7 +328,6 @@ export default class CompanyApiService extends BaseApiService {
         booksfrom: getElementText('BOOKSFROM')
       };
 
-      console.log('Parsed Tax Details:', taxDetails);
       return taxDetails;
     } catch (error) {
       console.error('Failed to fetch company tax details:', error);

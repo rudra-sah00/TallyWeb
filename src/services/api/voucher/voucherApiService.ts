@@ -53,13 +53,6 @@ export default class VoucherApiService extends BaseApiService {
         <SVTODATE TYPE="Date">${toDate}</SVTODATE>`;
     }
 
-    console.log(`Searching for transactions with ledger: "${ledgerName}" in company: "${companyName}"`);
-    if (fromDate && toDate) {
-      console.log(`Date range: ${fromDate} to ${toDate}`);
-    } else {
-      console.log('Fetching ALL transactions (no date filter)');
-    }
-
     const xmlRequest = `
 <ENVELOPE>
   <HEADER>
@@ -77,7 +70,6 @@ export default class VoucherApiService extends BaseApiService {
 </ENVELOPE>`;
 
     try {
-      console.log('Sending XML request to Tally server...');
       const response = await this.makeRequest(xmlRequest);
       
       if (response.includes('Unknown Request') || response.includes('LINEERROR')) {
@@ -85,13 +77,11 @@ export default class VoucherApiService extends BaseApiService {
         throw new Error('Invalid request format or ledger not found');
       }
       
-      console.log('Response received, parsing transactions...');
       const allTransactions = this.parseVoucherTransactions(response);
       
       // Filter transactions by ledger name if specified
       let filteredTransactions = allTransactions;
       if (ledgerName && ledgerName.trim() !== '') {
-        console.log(`Filtering transactions for ledger: "${ledgerName}"`);
         filteredTransactions = allTransactions.filter(transaction => {
           // Check if the ledger appears in inventory entries (stock items)
           const hasInventoryMatch = transaction.inventoryEntries.some(entry => 
@@ -111,10 +101,6 @@ export default class VoucherApiService extends BaseApiService {
           
           return hasInventoryMatch || hasLedgerMatch || hasPartyMatch;
         });
-        
-        console.log(`Found ${filteredTransactions.length} transactions matching ledger "${ledgerName}" out of ${allTransactions.length} total transactions`);
-      } else {
-        console.log(`Returning all ${allTransactions.length} transactions`);
       }
       
       return filteredTransactions;

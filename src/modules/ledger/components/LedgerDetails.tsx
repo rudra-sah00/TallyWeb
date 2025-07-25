@@ -111,9 +111,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({ ledger, companyName, serv
       if (!isAllTime) {
         tallyFromDate = formatDateForTally(fromDate);
         tallyToDate = formatDateForTally(toDate);
-        console.log(`Fetching transactions for ${ledger.name} from ${tallyFromDate} to ${tallyToDate}`);
       } else {
-        console.log(`Fetching ALL transactions for ${ledger.name}`);
       }
       
       const transactionList = await voucherApi.getVoucherTransactions(
@@ -123,9 +121,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({ ledger, companyName, serv
         tallyToDate
       );
       setTransactions(transactionList);
-      console.log(`Retrieved ${transactionList.length} transactions`);
     } catch (err) {
-      console.error('Failed to fetch transactions:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch transactions');
     } finally {
       setLoading(false);

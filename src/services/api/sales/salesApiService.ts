@@ -28,6 +28,23 @@ export interface SalesVoucher {
   voucherType: string;
   voucherRetainKey: string;
   stockItems?: StockItem[];
+  // Additional fields for complete voucher information
+  taxableAmount?: number;
+  totalTax?: number;
+  itemCount?: number;
+  gstBreakdown?: GSTBreakdown;
+  roundOff?: number;
+  totalDiscount?: number;
+}
+
+export interface GSTBreakdown {
+  cgst: number;
+  sgst: number;
+  igst: number;
+  cgstRate?: number;
+  sgstRate?: number;
+  igstRate?: number;
+  total: number;
 }
 
 export interface StockItem {
@@ -37,81 +54,15 @@ export interface StockItem {
   billedQty: string;
   amount: number;
   hsn?: string;
+  discount?: number;
+  discountPercent?: number;
 }
 
 export class SalesApiService extends BaseApiService {
-  
-  // Cache the last XML response to avoid re-querying Tally for voucher details
-  private lastXmlResponse: string = '';
-  
-  /**
-   * Get the cached XML response for voucher detail extraction
-   */
-  getCachedXmlResponse(): string {
-    return this.lastXmlResponse;
-  }
-  
-  /**
-   * Fetch and cache detailed voucher data for voucher details modal
-   * This method runs separately from getSalesVouchers to avoid breaking the overview
-   */
-  async cacheDetailedVoucherData(
-    companyName: string, 
-    dateRangeOption: DateRangeOption = 'currentMonth',
-    customFromDate?: Date,
-    customToDate?: Date
-  ): Promise<void> {
-    
-    if (!companyName) {
-      throw new Error('No company selected. Please select a company first.');
-    }
-
-    const { fromDate, toDate, label } = this.getDateRange(dateRangeOption, customFromDate, customToDate);
-    
-    const fromDateStr = this.formatDateForTally(fromDate);
-    const toDateStr = this.formatDateForTally(toDate);
-    
-    console.log(`🗂️ Caching detailed voucher data for ${label}: ${fromDateStr} to ${toDateStr}`);
-    
-    const xmlRequest = `<ENVELOPE>
-  <HEADER>
-    <TALLYREQUEST>Export Data</TALLYREQUEST>
-  </HEADER>
-  <BODY>
-    <EXPORTDATA>
-      <REQUESTDESC>
-        <REPORTNAME>Day Book</REPORTNAME>
-        <STATICVARIABLES>
-          <SVCURRENTCOMPANY>${companyName}</SVCURRENTCOMPANY>
-          <SVFROMDATE>${fromDateStr}</SVFROMDATE>
-          <SVTODATE>${toDateStr}</SVTODATE>
-          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-          <EXPLODEFLAG>Yes</EXPLODEFLAG>
-        </STATICVARIABLES>
-      </REQUESTDESC>
-    </EXPORTDATA>
-  </BODY>
-</ENVELOPE>`;
-
-    try {
-      console.log(`🔄 Fetching detailed voucher data for ${companyName} (${label})`);
-      const response = await this.makeRequest(xmlRequest);
-      
-      // Cache the detailed XML response for voucher details extraction
-      this.lastXmlResponse = response;
-      
-      console.log(`✅ Cached detailed voucher data (${response.length} characters)`);
-      console.log(`📊 Cache preview:`, response.substring(0, 200) + '...');
-      
-    } catch (error) {
-      console.error('Error caching detailed voucher data:', error);
-      throw new Error(`Failed to cache voucher details: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
 
   /**
    * Fetch individual voucher details directly from Tally by voucher GUID
-   * This method fetches a single voucher without caching
+   * This method fetches a single voucher with complete details including inventory
    */
   async fetchVoucherDetails(
     companyName: string,
@@ -124,8 +75,6 @@ export class SalesApiService extends BaseApiService {
     if (!voucherGuid) {
       throw new Error('Voucher GUID is required.');
     }
-
-    console.log(`🔍 Fetching individual voucher details for GUID: ${voucherGuid}`);
 
     const xmlRequest = `<ENVELOPE>
   <HEADER>
@@ -147,10 +96,7 @@ export class SalesApiService extends BaseApiService {
 </ENVELOPE>`;
 
     try {
-      console.log(`🔄 Fetching voucher details from Tally for GUID: ${voucherGuid}`);
       const response = await this.makeRequest(xmlRequest);
-      
-      console.log(`✅ Received voucher details (${response.length} characters)`);
       
       // Parse the XML response and find the voucher
       const parser = new DOMParser();
@@ -177,45 +123,7 @@ export class SalesApiService extends BaseApiService {
       return details;
       
     } catch (error) {
-      console.error('Error fetching voucher details:', error);
       throw new Error(`Failed to fetch voucher details: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-  
-  /**
-   * Extract detailed voucher information from cached XML response
-   */
-  getVoucherDetailsFromCache(voucherGuid: string): any {
-    if (!this.lastXmlResponse) {
-      throw new Error('No cached sales data available. Please refresh the sales data first.');
-    }
-    
-    try {
-      // Clean XML to remove invalid characters
-      const cleanedXml = this.cleanXmlForParsing(this.lastXmlResponse);
-      const doc = this.parseXML(cleanedXml);
-      
-      // Find the specific voucher by GUID
-      const vouchers = doc.querySelectorAll('VOUCHER');
-      let targetVoucher: Element | null = null;
-      
-      vouchers.forEach(voucher => {
-        const guid = voucher.querySelector('GUID')?.textContent;
-        if (guid === voucherGuid) {
-          targetVoucher = voucher;
-        }
-      });
-      
-      if (!targetVoucher) {
-        throw new Error('Voucher not found in cached data');
-      }
-      
-      // Extract detailed information
-      return this.extractVoucherDetails(targetVoucher);
-      
-    } catch (error) {
-      console.error('Error extracting voucher details from cache:', error);
-      throw new Error(`Failed to extract voucher details: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
   
@@ -395,7 +303,7 @@ export class SalesApiService extends BaseApiService {
   }
   
   /**
-   * Fetch sales vouchers for a specific date range
+   * Fetch sales vouchers for a specific date range with complete details
    */
   async getSalesVouchers(
     companyName: string, 
@@ -413,8 +321,7 @@ export class SalesApiService extends BaseApiService {
     const fromDateStr = this.formatDateForTally(fromDate);
     const toDateStr = this.formatDateForTally(toDate);
     
-    console.log(`📅 Fetching sales for ${label}: ${fromDateStr} to ${toDateStr}`);
-    
+    // Use the proven TDL-based query that works (same as original working query)
     const xmlRequest = `<ENVELOPE>
   <HEADER>
     <VERSION>1</VERSION>
@@ -443,19 +350,12 @@ export class SalesApiService extends BaseApiService {
 </ENVELOPE>`;
 
     try {
-      console.log(`🔄 Fetching sales vouchers for ${companyName} (${label})`);
-      console.log(`📤 XML Request:`, xmlRequest);
       const response = await this.makeRequest(xmlRequest);
-      
-      // Cache the XML response for voucher details extraction
-      this.lastXmlResponse = response;
       
       const result = this.parseSalesVouchersResponse(response);
       
-      console.log(`📊 Found ${result.length} sales vouchers for ${label}`);
       return result;
     } catch (error) {
-      console.error('Error fetching sales vouchers:', error);
       throw new Error(`Failed to fetch sales data: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -472,13 +372,7 @@ export class SalesApiService extends BaseApiService {
    */
   private parseSalesVouchersResponse(xmlText: string): SalesVoucher[] {
     try {
-      console.log('🔍 Parsing XML response...');
-      console.log('📄 Response size:', xmlText.length, 'characters');
-      console.log('📄 XML Preview (first 500 chars):', xmlText.substring(0, 500) + '...');
-      console.log('📄 XML Preview (last 500 chars):', '...' + xmlText.substring(xmlText.length - 500));
-      
       // Clean XML to remove invalid characters before parsing
-      console.log('🧹 Cleaning XML for parsing...');
       const cleanedXml = this.cleanXmlForParsing(xmlText);
       
       // Try alternative parsing methods for large XML
@@ -487,39 +381,30 @@ export class SalesApiService extends BaseApiService {
       // Check for parsing errors
       const parserError = doc.querySelector('parsererror');
       if (parserError) {
-        console.error('❌ XML Parser Error:', parserError.textContent);
         throw new Error('XML parsing failed');
       }
       
       // Try different selectors to find vouchers
       let vouchers = doc.querySelectorAll('VOUCHER');
-      console.log(`📦 Found ${vouchers.length} vouchers with 'VOUCHER' selector`);
       
       if (vouchers.length === 0) {
         // Try case-insensitive
         vouchers = doc.querySelectorAll('voucher');
-        console.log(`📦 Found ${vouchers.length} vouchers with 'voucher' selector`);
       }
       
       if (vouchers.length === 0) {
         // Try with namespace
         vouchers = doc.querySelectorAll('*[tagName="VOUCHER"], *[nodeName="VOUCHER"]');
-        console.log(`📦 Found ${vouchers.length} vouchers with namespace selector`);
       }
       
       // If still no vouchers, let's inspect the XML structure
       if (vouchers.length === 0) {
         const collections = doc.querySelectorAll('COLLECTION');
-        console.log(`📦 Found ${collections.length} COLLECTION elements`);
         
         collections.forEach((collection, index) => {
-          console.log(`Collection ${index + 1} children:`, Array.from(collection.children).map(c => c.nodeName));
+          // console.log(`Collection ${index + 1} children:`, Array.from(collection.children).map(c => c.nodeName));
         });
       }
-      
-      // Debug: Count actual VOUCHER text occurrences in the XML
-      const voucherMatches = (xmlText.match(/<VOUCHER/g) || []).length;
-      console.log(`📊 Manual count of '<VOUCHER' in XML: ${voucherMatches}`);
       
       // Collect all voucher types for analysis
       const voucherTypes = new Map<string, number>();
@@ -530,21 +415,6 @@ export class SalesApiService extends BaseApiService {
                        voucher.querySelector('VOUCHERTYPE')?.textContent ||
                        'Unknown';
         voucherTypes.set(vchType, (voucherTypes.get(vchType) || 0) + 1);
-      });
-      
-      console.log('📋 All voucher types found in XML:');
-      Array.from(voucherTypes.entries())
-        .sort((a, b) => b[1] - a[1]) // Sort by count descending
-        .forEach(([type, count]) => {
-          console.log(`   ${type}: ${count} vouchers`);
-        });
-      
-      // Log first few voucher types for debugging
-      vouchers.forEach((voucher, index) => {
-        if (index < 10) { // Only log first 10
-          const vchType = voucher.getAttribute('VCHTYPE') || '';
-          console.log(`📋 Voucher ${index + 1}: Type="${vchType}"`);
-        }
       });
       
       const salesVouchers: SalesVoucher[] = [];
@@ -558,25 +428,18 @@ export class SalesApiService extends BaseApiService {
                          voucher.querySelector('VOUCHERTYPE')?.textContent ||
                          '';
           
-          console.log(`🔍 Voucher ${index + 1}: Type="${vchType}"`);
-          console.log(`📋 Voucher ${index + 1} attributes:`, Array.from(voucher.attributes).map(attr => `${attr.name}="${attr.value}"`));
-          
           // Log all child elements for debugging
           const childElements = Array.from(voucher.children).map(child => child.nodeName);
-          console.log(`🏷️ Voucher ${index + 1} child elements:`, childElements);
           
           // Extract basic voucher information with detailed logging
           const dateElement = voucher.querySelector('DATE');
           const date = dateElement?.textContent || '';
-          console.log(`📅 Voucher ${index + 1} date: "${date}"`);
           
           const voucherNumberElement = voucher.querySelector('VOUCHERNUMBER');
           const voucherNumber = voucherNumberElement?.textContent || '';
-          console.log(`🔢 Voucher ${index + 1} number: "${voucherNumber}"`);
           
           const partyNameElement = voucher.querySelector('PARTYLEDGERNAME');
           const partyName = partyNameElement?.textContent || '';
-          console.log(`👤 Voucher ${index + 1} party: "${partyName}"`);
           
           // Extract amount with detailed logging - check multiple possible locations
           const amountElement = voucher.querySelector('AMOUNT');
@@ -598,43 +461,17 @@ export class SalesApiService extends BaseApiService {
           }
           
           const amount = Math.abs(parseFloat(amountText) || 0);
-          console.log(`💰 Voucher ${index + 1} amount: "${amountText}" -> ${amount}`);
           
           // Skip vouchers with no meaningful data
           if (!date && !voucherNumber && !partyName && amount === 0) {
-            console.log(`⏭️ Skipping voucher ${index + 1} - no meaningful data`);
             return;
           }
           
-          // Filter for actual sales vouchers, excluding Proforma Invoices
-          // We want only real sales transactions, not estimates/quotes
-          const realSalesTypes = ['Tax Invoice', 'Sales Invoice'];
-          const excludeTypes = ['Proforma Invoice', 'Proforma', 'Estimate', 'Quote'];
-          
-          // First check if it's a real sales voucher type
-          const isRealSalesVoucher = realSalesTypes.some(type => {
-            const isMatch = vchType.toLowerCase().includes(type.toLowerCase());
-            if (isMatch) {
-              console.log(`🎯 Found real sales voucher: "${vchType}" contains "${type}"`);
-            }
-            return isMatch;
-          });
-          
-          // Then check if it's an excluded type (like Proforma Invoice)
-          const isExcludedType = excludeTypes.some(type => {
-            const isMatch = vchType.toLowerCase().includes(type.toLowerCase());
-            if (isMatch) {
-              console.log(`❌ Excluding voucher: "${vchType}" contains "${type}" (not a real sale)`);
-            }
-            return isMatch;
-          });
-          
-          if (!isRealSalesVoucher || isExcludedType) {
-            console.log(`⏭️ Skipping voucher ${index + 1} with type: "${vchType}" (not a real sales voucher)`);
+          // Filter for only Tax Invoice vouchers (exact match)
+          // Exclude Proforma Invoices and other non-sales vouchers
+          if (vchType !== 'Tax Invoice') {
             return;
           }
-          
-          console.log(`✅ Processing sales voucher ${index + 1} (Type: ${vchType})`);
           
           // Extract GUID for unique ID
           const guidElement = voucher.querySelector('GUID');
@@ -644,23 +481,115 @@ export class SalesApiService extends BaseApiService {
           const remoteid = voucher.getAttribute('REMOTEID') || '';
           const vchkey = voucher.getAttribute('VCHKEY') || '';
           
+          // Extract inventory details (stock items) from ALLINVENTORYENTRIES.LIST
+          const stockItems: StockItem[] = [];
+          let totalDiscount = 0;
+          const inventoryElements = voucher.querySelectorAll('ALLINVENTORYENTRIES\\.LIST');
+          
+          inventoryElements.forEach(entry => {
+            const stockItemName = entry.querySelector('STOCKITEMNAME')?.textContent || '';
+            const actualQty = entry.querySelector('ACTUALQTY')?.textContent || '';
+            const billedQty = entry.querySelector('BILLEDQTY')?.textContent || '';
+            const rate = entry.querySelector('RATE')?.textContent || '';
+            const itemAmount = Math.abs(parseFloat(entry.querySelector('AMOUNT')?.textContent || '0'));
+            const hsnCode = entry.querySelector('GSTHSNNAME')?.textContent || '';
+            
+            // Extract rate and quantity values for proper discount calculation
+            const rateValue = parseFloat(rate?.replace(/[^\d.-]/g, '') || '0');
+            const qtyValue = parseFloat(billedQty?.replace(/[^\d.-]/g, '') || '0');
+            const grossAmount = rateValue * qtyValue;
+            const discountPercent = parseFloat(entry.querySelector('DISCOUNT')?.textContent || '0');
+            const discountAmount = grossAmount > 0 ? (grossAmount * (discountPercent / 100)) : 0;
+            if (stockItemName) {
+              stockItems.push({
+                name: stockItemName,
+                rate: rate,
+                actualQty: actualQty,
+                billedQty: billedQty,
+                amount: itemAmount,
+                hsn: hsnCode || 'N/A',
+                discount: discountAmount > 0 ? Math.round(discountAmount * 100) / 100 : undefined,
+                discountPercent: discountPercent > 0 ? Math.round(discountPercent * 100) / 100 : undefined
+              });
+              totalDiscount += discountAmount;
+            }
+          });
+          
+          // Extract GST breakdown from LEDGERENTRIES.LIST (not ALLLEDGERENTRIES.LIST)
+          const gstBreakdown: GSTBreakdown = {
+            cgst: 0,
+            sgst: 0,
+            igst: 0,
+            total: 0
+          };
+          let roundOff = 0;
+          
+          const ledgerEntries = voucher.querySelectorAll('LEDGERENTRIES\\.LIST');
+          ledgerEntries.forEach(entry => {
+            const ledgerName = entry.querySelector('LEDGERNAME')?.textContent || '';
+            const ledgerAmount = parseFloat(entry.querySelector('AMOUNT')?.textContent || '0');
+            
+            // Extract GST amounts and rates
+            if (ledgerName.toLowerCase().includes('cgst')) {
+              gstBreakdown.cgst += Math.abs(ledgerAmount);
+              const rateMatch = ledgerName.match(/@(\d+(?:\.\d+)?)%/);
+              if (rateMatch && !gstBreakdown.cgstRate) {
+                gstBreakdown.cgstRate = parseFloat(rateMatch[1]);
+              }
+            } else if (ledgerName.toLowerCase().includes('sgst') || ledgerName.toLowerCase().includes('utgst')) {
+              gstBreakdown.sgst += Math.abs(ledgerAmount);
+              const rateMatch = ledgerName.match(/@(\d+(?:\.\d+)?)%/);
+              if (rateMatch && !gstBreakdown.sgstRate) {
+                gstBreakdown.sgstRate = parseFloat(rateMatch[1]);
+              }
+            } else if (ledgerName.toLowerCase().includes('igst')) {
+              gstBreakdown.igst += Math.abs(ledgerAmount);
+              const rateMatch = ledgerName.match(/@(\d+(?:\.\d+)?)%/);
+              if (rateMatch && !gstBreakdown.igstRate) {
+                gstBreakdown.igstRate = parseFloat(rateMatch[1]);
+              }
+            } else if (ledgerName.toLowerCase().includes('rounding') || ledgerName.toLowerCase().includes('round off')) {
+              roundOff = ledgerAmount;
+            }
+          });
+          
+          gstBreakdown.total = gstBreakdown.cgst + gstBreakdown.sgst + gstBreakdown.igst;
+          
+          // Extract additional voucher details
+          const referenceElement = voucher.querySelector('REFERENCE');
+          const reference = referenceElement?.textContent || '';
+          
+          const narrationElement = voucher.querySelector('NARRATION') || voucher.querySelector('BASICNARRATION');
+          const narration = narrationElement?.textContent || '';
+          
+          // Calculate totals
+          const totalItemAmount = stockItems.reduce((sum, item) => sum + item.amount, 0);
+          const totalTax = gstBreakdown.total;
+          
           const salesVoucher: SalesVoucher = {
             id: remoteid || guid || `voucher_${index}`,
             voucherNumber: voucherNumber || `N/A`,
             date: this.formatTallyDate(date) || 'N/A',
             partyName: partyName.trim() || 'Unknown Customer',
             amount: amount,
-            narration: '', // Not fetched in this simple query
-            reference: '', // Not fetched in this simple query
+            narration: narration || '', // Extracted from voucher
+            reference: reference || '', // Extracted from voucher
             guid: guid,
             alterid: '',
             voucherType: vchType || 'Unknown',
-            voucherRetainKey: vchkey
+            voucherRetainKey: vchkey,
+            stockItems: stockItems.length > 0 ? stockItems : undefined,
+            taxableAmount: totalItemAmount > 0 ? totalItemAmount : undefined,
+            totalTax: totalTax > 0 ? totalTax : undefined,
+            itemCount: stockItems.length > 0 ? stockItems.length : undefined,
+            gstBreakdown: gstBreakdown.total > 0 ? gstBreakdown : undefined,
+            roundOff: roundOff !== 0 ? roundOff : undefined,
+            totalDiscount: totalDiscount > 0 ? totalDiscount : undefined
           };
           
           salesVouchers.push(salesVoucher);
         } catch (err) {
-          console.warn(`Error parsing voucher ${index}:`, err);
+          // console.warn(`Error parsing voucher ${index}:`, err);
         }
       });
       
@@ -671,20 +600,19 @@ export class SalesApiService extends BaseApiService {
       const salesInvoiceCount = salesVouchers.filter(v => v.voucherType.toLowerCase().includes('sales invoice')).length;
       const proformaCount = Array.from(voucherTypes.entries()).find(([type]) => type.toLowerCase().includes('proforma'))?.[1] || 0;
       
-      console.log(`📊 PARSING SUMMARY:`);
-      console.log(`   Total vouchers in XML: ${totalVouchers}`);
-      console.log(`   Real sales vouchers found: ${salesVouchersFound}`);
-      console.log(`   ├─ Tax Invoice vouchers: ${taxInvoiceCount}`);
-      console.log(`   ├─ Sales Invoice vouchers: ${salesInvoiceCount}`);
-      console.log(`   └─ Other real sales: ${salesVouchersFound - taxInvoiceCount - salesInvoiceCount}`);
-      console.log(`   Excluded Proforma Invoices: ${proformaCount}`);
-      console.log(`   Other non-sales vouchers: ${totalVouchers - salesVouchersFound - proformaCount}`);
+      // console.log(`📊 PARSING SUMMARY:`);
+      // console.log(`   Total vouchers in XML: ${totalVouchers}`);
+      // console.log(`   Real sales vouchers found: ${salesVouchersFound}`);
+      // console.log(`   ├─ Tax Invoice vouchers: ${taxInvoiceCount}`);
+      // console.log(`   ├─ Sales Invoice vouchers: ${salesInvoiceCount}`);
+      // console.log(`   └─ Other real sales: ${salesVouchersFound - taxInvoiceCount - salesInvoiceCount}`);
+      // console.log(`   Excluded Proforma Invoices: ${proformaCount}`);
+      // console.log(`   Other non-sales vouchers: ${totalVouchers - salesVouchersFound - proformaCount}`);
       
-      console.log(`✅ Parsed ${salesVouchers.length} sales vouchers from ${vouchers.length} total vouchers`);
+      // console.log(`✅ Parsed ${salesVouchers.length} sales vouchers from ${vouchers.length} total vouchers`);
       return salesVouchers;
       
     } catch (error) {
-      console.error('❌ Error parsing sales vouchers XML:', error);
       throw new Error('Failed to parse sales vouchers data');
     }
   }
@@ -711,7 +639,6 @@ export class SalesApiService extends BaseApiService {
     // eslint-disable-next-line no-control-regex
     cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
     
-    console.log('🧹 XML cleaned - removed invalid characters');
     return cleaned;
   }
 

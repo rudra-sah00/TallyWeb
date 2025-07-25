@@ -84,7 +84,6 @@ class StockAnalyticsService {
 
   generateAnalytics(stockItems: StockItem[]): StockAnalytics {
     const startTime = Date.now();
-    console.log(`🔍 Starting comprehensive analytics for ${stockItems.length} items...`);
     
     if (!stockItems || stockItems.length === 0) {
       console.warn('⚠️ No stock items provided for analytics');
@@ -94,8 +93,7 @@ class StockAnalyticsService {
     try {
       // Calculate dynamic thresholds
       const lowStockThreshold = this.calculateDynamicLowStockThreshold(stockItems);
-      console.log(`📊 Using dynamic low stock threshold: ${lowStockThreshold} units`);
-
+      
       // Process all items without any limits
       const allProcessedItems = stockItems.map(item => {
         const closingBalance = this.parseNumericValue(item.closingBalance);
@@ -199,17 +197,6 @@ class StockAnalyticsService {
           lastAnalyzed: new Date().toISOString()
         }
       };
-
-      console.log(`✅ Analytics completed in ${processingTime}ms:`, {
-        totalItems: stockItems.length,
-        highValueItems: highValueItems.length,
-        lowStockItems: lowStockItems.length,
-        zeroStockItems: zeroStockItems.length,
-        totalValue: `₹${totalValue.toLocaleString()}`,
-        averageValue: `₹${averageValue.toFixed(2)}`,
-        highValueThreshold: `₹${this.HIGH_VALUE_THRESHOLD.toLocaleString()}`,
-        lowStockThreshold: `${lowStockThreshold} units`
-      });
 
       return analytics;
     } catch (error) {

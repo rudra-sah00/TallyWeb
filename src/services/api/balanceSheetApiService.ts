@@ -58,14 +58,11 @@ export class BalanceSheetApiService extends BaseApiService {
 </ENVELOPE>`;
 
     try {
-      console.log(`Balance Sheet API Request (${timestamp}):`, { fromDate, toDate, companyName });
       const xmlText = await this.makeRequest(xmlRequest);
-      console.log(`Balance Sheet XML Response (${timestamp}):`, xmlText);
       
       const xmlDoc = this.parseXML(xmlText);
       const balanceSheetData = this.parseBalanceSheetXML(xmlDoc);
       
-      console.log(`Parsed Balance Sheet Data (${timestamp}):`, balanceSheetData);
       return balanceSheetData;
     } catch (error) {
       console.error('Failed to fetch balance sheet:', error);

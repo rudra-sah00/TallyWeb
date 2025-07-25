@@ -59,7 +59,6 @@ export default class LedgerApiService extends BaseApiService {
       const response = await this.makeRequest(xmlRequest);
       return this.parseLedgerList(response);
     } catch (error) {
-      console.error('Failed to fetch ledger list:', error);
       throw error;
     }
   }
@@ -105,7 +104,6 @@ export default class LedgerApiService extends BaseApiService {
       const response = await this.makeRequest(xmlRequest);
       return this.parseLedgerDetails(response);
     } catch (error) {
-      console.error('Failed to fetch ledger details:', error);
       throw error;
     }
   }

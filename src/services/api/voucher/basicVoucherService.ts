@@ -30,7 +30,6 @@ export class BasicVoucherService extends BaseApiService {
    */
   getVoucherDetailsFromCache(voucherGuid: string, salesResponseXml: string): BasicVoucherDetail | null {
     try {
-      console.log('🔍 Extracting voucher details from cached response...');
       
       // Clean XML to remove invalid characters
       const cleanedXml = this.cleanXmlForParsing(salesResponseXml);
@@ -49,7 +48,6 @@ export class BasicVoucherService extends BaseApiService {
       }
       
       if (!targetVoucher) {
-        console.error('❌ Voucher not found in cached response');
         return null;
       }
       
@@ -77,11 +75,9 @@ export class BasicVoucherService extends BaseApiService {
         items
       };
       
-      console.log('✅ Successfully extracted voucher details from cache');
       return voucherDetail;
       
     } catch (error) {
-      console.error('❌ Error extracting voucher details from cache:', error);
       return null;
     }
   }
@@ -114,7 +110,6 @@ export class BasicVoucherService extends BaseApiService {
         }
       });
       
-      console.log(`📦 Found ${items.length} inventory items`);
     } catch (error) {
       console.warn('Warning: Could not extract inventory items:', error);
     }
