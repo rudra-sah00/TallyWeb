@@ -108,17 +108,22 @@ export default class BaseApiService {
     } catch (error) {
       // Provide more specific error messages
       if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-        throw new Error(`CORS Error: Failed to connect to server ${this.baseURL}. 
+        throw new Error(`Connection Error: Unable to connect to Tally server at ${this.baseURL}
 
-This is likely a CORS (Cross-Origin Resource Sharing) issue. External servers like ${this.baseURL} need to allow browser requests.
+Possible causes:
+1. Tally server is not running or accessible
+2. Network connectivity issues
+3. Firewall blocking the connection
+4. Server IP address has changed
+5. Port 9000 is blocked
 
-Solutions:
-1. Enable CORS on your Tally server
-2. Use a proxy server
-3. Run from the same network/domain
-4. Check if Tally Gateway allows browser requests
+Current configuration: ${this.baseURL}
 
-Technical note: curl works but browser doesn't due to CORS security policy.`);
+Please verify:
+- Tally Gateway is running on the target server
+- The server IP address is correct
+- Port 9000 is accessible from your network
+- No firewall is blocking the connection`);
       }
       
       if (error instanceof Error && error.message.includes('timeout')) {

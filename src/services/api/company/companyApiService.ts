@@ -228,8 +228,40 @@ export default class CompanyApiService extends BaseApiService {
       details.typeOfSupply = details['cmptypeofsupply'] || details['typeOfSupply'] || details['CMPTYPEOFSUPPLY'] || '';
       // PAN
       details.pan = details['incometaxnumber'] || details['pan'] || details['INCOMETAXNUMBER'] || '';
-      // GSTIN
-      details.gstin = details['gstregistrationnumber'] || details['gstin'] || details['GSTREGISTRATIONNUMBER'] || '';
+      // GSTIN - try multiple sources including LOGINIDENTIFIER from TPLOGININFO.LIST
+      let gstin = details['gstregistrationnumber'] || 
+                  details['gstin'] || 
+                  details['GSTREGISTRATIONNUMBER'] || '';
+      
+      // If not found, look for LOGINIDENTIFIER in TPLOGININFO.LIST
+      if (!gstin) {
+        // Try different selector variations for TPLOGININFO.LIST
+        const tploginList = companyElement.querySelector('TPLOGININFO\\.LIST') || 
+                           companyElement.querySelector('TPLOGININFO.LIST') ||
+                           companyElement.querySelector('tplogininfo\\.list') ||
+                           companyElement.querySelector('tplogininfo.list');
+        if (tploginList) {
+          const loginIdentifier = tploginList.querySelector('LOGINIDENTIFIER') ||
+                                  tploginList.querySelector('loginidentifier');
+          if (loginIdentifier) {
+            gstin = loginIdentifier.textContent?.trim() || '';
+            console.log('Found GSTIN from LOGINIDENTIFIER:', gstin);
+          }
+        } else {
+          console.log('TPLOGININFO.LIST not found, trying global search...');
+          // Try a global search for LOGINIDENTIFIER
+          const loginIdentifier = companyElement.querySelector('LOGINIDENTIFIER') ||
+                                  companyElement.querySelector('loginidentifier');
+          if (loginIdentifier) {
+            gstin = loginIdentifier.textContent?.trim() || '';
+            console.log('Found GSTIN from global LOGINIDENTIFIER search:', gstin);
+          }
+        }
+      }
+      
+      details.gstin = gstin;
+      // Also store as loginidentifier for PDF generator compatibility
+      details.loginidentifier = gstin;
       // Contact Person
       details.contactPerson = details['companycontactperson'] || details['contactPerson'] || details['COMPANYCONTACTPERSON'] || '';
       // Contact Number

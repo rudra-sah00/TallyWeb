@@ -1,12 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { X, FileText, User, Calendar, Receipt, ShoppingCart, DollarSign, Percent, Package, Share2 } from 'lucide-react';
+import { 
+  X, 
+  FileText, 
+  AlertTriangle, 
+  Loader2, 
+  Share2, 
+  MessageCircle, 
+  Mail, 
+  ChevronDown,
+  FileSpreadsheet,
+  Calendar,
+  User,
+  Receipt,
+  ShoppingCart,
+  Package,
+  DollarSign,
+  Percent
+} from 'lucide-react';
 import { SalesApiService } from '../../../services/api/sales/salesApiService';
 import { useCompany } from '../../../context/CompanyContext';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
 import CompanyApiService, { TallyCompanyDetails } from '../../../services/api/company/companyApiService';
 import LedgerApiService from '../../../services/api/ledger/ledgerApiService';
+import { PDFGenerator } from '../../../utils/exportUtils/pdfGenerator';
 
 interface StockItem {
   stockItem: string;
@@ -73,11 +88,14 @@ export const SimpleVoucherModal: React.FC<SimpleVoucherModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { selectedCompany } = useCompany();
-  const [showShareOptions, setShowShareOptions] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [excelLoading, setExcelLoading] = useState(false);
   const [companyDetails, setCompanyDetails] = useState<TallyCompanyDetails | null>(null);
+  const [companyLoading, setCompanyLoading] = useState(false);
+  const [companyLoadAttempted, setCompanyLoadAttempted] = useState(false);
   const [partyDetails, setPartyDetails] = useState<any>(null); // You can type this better if needed
+  const [showShareDropdown, setShowShareDropdown] = useState(false);
+  const [currentPdfBlob, setCurrentPdfBlob] = useState<Blob | null>(null);
 
   const salesApiService = new SalesApiService();
 
@@ -94,10 +112,26 @@ export const SimpleVoucherModal: React.FC<SimpleVoucherModalProps> = ({
   }, [isOpen, voucherGuid, selectedCompany, voucherData]);
 
   useEffect(() => {
-    if (isOpen && selectedCompany) {
-      // Fetch company details
+    console.log('Company details useEffect triggered:', { isOpen, selectedCompany, companyLoadAttempted });
+    
+    if (isOpen && selectedCompany && !companyLoadAttempted) {
+      console.log('Fetching company details for:', selectedCompany);
+      // Fetch company details only once per company
       const api = new CompanyApiService();
+      setCompanyDetails(null); // Reset to show loading state
+      setCompanyLoading(true);
+      setCompanyLoadAttempted(true);
+      
       api.getCompanyDetails(selectedCompany).then(details => {
+        console.log('Raw company details from API:', details);
+        
+        if (!details) {
+          console.error('No company details returned from API');
+          setCompanyDetails(null);
+          setCompanyLoading(false);
+          return;
+        }
+
         // Normalize all keys to lowerCamelCase
         const toCamel = (str: string) => {
           return str
@@ -112,11 +146,26 @@ export const SimpleVoucherModal: React.FC<SimpleVoucherModalProps> = ({
             Object.entries(obj).map(([k, v]) => [toCamel(k), normalizeKeys(v)])
           );
         };
-        setCompanyDetails(normalizeKeys(details));
-        console.log('DEBUG companyDetails:', normalizeKeys(details)); // Debug log
+        const normalizedDetails = normalizeKeys(details);
+        setCompanyDetails(normalizedDetails);
+        setCompanyLoading(false);
+        console.log('✅ Company details loaded successfully:', normalizedDetails);
+      }).catch(error => {
+        console.error('❌ Error fetching company details:', error);
+        setCompanyDetails(null);
+        setCompanyLoading(false);
       });
+    } else if (!isOpen) {
+      // Reset when modal closes
+      setCompanyLoadAttempted(false);
+    } else {
+      console.log('Skipping company details fetch:', { isOpen, selectedCompany, companyLoadAttempted, alreadyLoaded: !!companyDetails });
+      if (!isOpen) {
+        setCompanyDetails(null);
+        setCompanyLoading(false);
+      }
     }
-  }, [isOpen, selectedCompany]);
+  }, [isOpen, selectedCompany, companyLoadAttempted]);
 
   useEffect(() => {
     if (voucherDetail?.party && selectedCompany) {
@@ -220,396 +269,243 @@ export const SimpleVoucherModal: React.FC<SimpleVoucherModalProps> = ({
   };
 
   // --- Export Handlers ---
-  const handleShareClick = () => {
-    setShowShareOptions(true);
-  };
+  const handleExportPDF = async () => {
+    if (!voucherDetail) {
+      setError('No voucher data available for export');
+      return;
+    }
 
-  const handleExport = async (format: 'pdf' | 'excel') => {
-    if (!voucherDetail) return;
     setExporting(true);
-    setShowShareOptions(false);
+
     try {
-      if (format === 'pdf') {
-        const doc = new jsPDF('p', 'mm', 'a4');
-        // --- PDF generation code ---
-        // Header Bar
-        doc.setFillColor(41, 128, 185);
-        doc.rect(0, 0, 210, 14, 'F');
-        doc.setFontSize(14);
-        doc.setTextColor(255);
-        doc.text('Tax Invoice', 105, 9, { align: 'center' });
-        doc.setTextColor(0);
-        // Company Info
-        let y = 20;
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'bold');
-        doc.text(companyDetails?.name || companyDetails?.basiccompanyformalname || companyDetails?.cmptradename || '', 10, y);
-        doc.setFont('helvetica', 'normal');
-        y += 6;
-        if (companyDetails?.addresslist && Array.isArray(companyDetails.addresslist) && companyDetails.addresslist.length > 0) {
-          companyDetails.addresslist.forEach((line: string) => {
-            doc.text(line, 10, y);
-            y += 5;
-          });
-        } else if (typeof companyDetails?.addresslist === 'string' && companyDetails.addresslist) {
-          doc.text(companyDetails.addresslist, 10, y);
-          y += 5;
-        }
-        if (companyDetails?.mobilenumberslist && Array.isArray(companyDetails.mobilenumberslist) && companyDetails.mobilenumberslist.length > 0) {
-          doc.text(`Mob: ${companyDetails.mobilenumberslist.join(', ')}`, 10, y);
-          y += 5;
-        } else if (companyDetails?.phone) {
-          doc.text(`Mob: ${companyDetails.phone}`, 10, y);
-          y += 5;
-        }
-        if (companyDetails?.gstregistrationnumber) {
-          doc.text(`GSTIN/UIN: ${companyDetails.gstregistrationnumber}`, 10, y);
-          y += 5;
-        }
-        if (companyDetails?.priorstatename) {
-          doc.text(`State Name: ${companyDetails.priorstatename}`, 10, y);
-          y += 5;
-        }
-        if (companyDetails?.email) {
-          doc.text(`E-Mail: ${companyDetails.email}`, 10, y);
-          y += 5;
-        }
-        // Invoice Info
-        let xRight = 120;
-        let yRight = 20;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.text('Invoice No.:', xRight, yRight);
-        doc.setFont('helvetica', 'normal');
-        doc.text(voucherDetail.number, xRight + 35, yRight);
-        yRight += 8;
-        doc.setFont('helvetica', 'bold');
-        doc.text('Dated:', xRight, yRight);
-        doc.setFont('helvetica', 'normal');
-        doc.text(voucherDetail.date, xRight + 35, yRight);
-        // Buyer Info
-        y += 4;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.text('Buyer (Bill to)', 10, y);
-        doc.setFont('helvetica', 'normal');
-        y += 6;
-        doc.text(voucherDetail.party, 10, y);
-        y += 5;
-        if (partyDetails?.address) {
-          doc.text(partyDetails.address, 10, y);
-          y += 5;
-        }
-        if (partyDetails?.stateName) {
-          doc.text(`State Name: ${partyDetails.stateName}, Code: 21`, 10, y);
-          y += 5;
-        }
-        // Table
-        const tableStartY = Math.max(y + 4, 60);
-        autoTable(doc, {
-          startY: tableStartY,
-          head: [[
-            'Sl No.', 'Description of Goods', 'HSN/SAC', 'Quantity', 'Rate', 'per', 'Disc. %', 'Amount'
-          ]],
-          body: voucherDetail.items.map((item, idx) => [
-            idx + 1,
-            item.stockItem,
-            item.hsn,
-            `${item.quantity} ${item.unit}`,
-            item.rate,
-            item.unit,
-            item.discountPercent || '',
-            item.amount.toFixed(2)
-          ]),
-          theme: 'grid',
-          headStyles: { fillColor: [220, 230, 241], textColor: 0, fontStyle: 'bold' },
-          styles: { fontSize: 9, cellPadding: 2 },
-          alternateRowStyles: { fillColor: [245, 248, 255] },
-          columnStyles: {
-            0: { cellWidth: 12 },
-            1: { cellWidth: 60 },
-            2: { cellWidth: 20 },
-            3: { cellWidth: 22 },
-            4: { cellWidth: 18 },
-            5: { cellWidth: 14 },
-            6: { cellWidth: 16 },
-            7: { cellWidth: 24 }
-          }
-        });
-        // GST & Summary
-        let summaryY = (doc as any).lastAutoTable.finalY + 8;
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(41, 128, 185);
-        doc.text('Output CGST @9%', 120, summaryY);
-        doc.text('Output SGST @9%', 120, summaryY + 6);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(0);
-        doc.text('9 %', 160, summaryY);
-        doc.text('9 %', 160, summaryY + 6);
-        doc.text(voucherDetail.gstDetails.cgst.toFixed(2), 180, summaryY);
-        doc.text(voucherDetail.gstDetails.sgst.toFixed(2), 180, summaryY + 6);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(41, 128, 185);
-        doc.text('Rounding Off', 120, summaryY + 12);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(0);
-        doc.text(voucherDetail.roundOff.toFixed(2), 180, summaryY + 12);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(33, 150, 83);
-        doc.text('Total', 120, summaryY + 18);
-        doc.text(`Rs ${voucherDetail.finalAmount.toFixed(2)}`, 180, summaryY + 18);
-        // Amount in Words
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.setTextColor(0);
-        doc.text('Amount Chargeable (in words)', 10, summaryY + 18);
-        doc.setFont('helvetica', 'bold');
-        doc.text('INR Seven Thousand Six Hundred Only', 10, summaryY + 24);
-        // Address Block
-        let addressY = (doc as any).lastAutoTable?.finalY + 20 || 120;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.text('Company Address:', 10, addressY);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        if (companyDetails?.addresslist && Array.isArray(companyDetails.addresslist) && companyDetails.addresslist.length > 0) {
-          companyDetails.addresslist.forEach((line: string, idx: number) => {
-            doc.text(line, 10, addressY + 5 + idx * 5);
-          });
-          addressY += 5 * companyDetails.addresslist.length;
-        } else if (typeof companyDetails?.addresslist === 'string' && companyDetails.addresslist) {
-          doc.text(companyDetails.addresslist, 10, addressY + 5);
-          addressY += 5;
-        } else {
-          doc.text('Not Provided', 10, addressY + 5);
-          addressY += 5;
-        }
-        addressY += 8;
-        // Footer: Company Details, PAN, GSTIN, Bank Details
-        let footerY = addressY;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.text("Company's PAN:", 10, footerY);
-        doc.setFont('helvetica', 'normal');
-        doc.text(companyDetails?.incometaxnumber || 'Not Provided', 40, footerY);
-        doc.setFont('helvetica', 'bold');
-        doc.text("GSTIN:", 80, footerY);
-        doc.setFont('helvetica', 'normal');
-        doc.text(companyDetails?.gstregistrationnumber || 'Not Provided', 100, footerY);
-        doc.setFont('helvetica', 'bold');
-        doc.text('Contact:', 140, footerY);
-        doc.setFont('helvetica', 'normal');
-        doc.text((companyDetails?.companycontactperson ? companyDetails.companycontactperson + ' ' : '') + (companyDetails?.companycontactnumber || 'Not Provided'), 160, footerY);
-        footerY += 6;
-        doc.setFont('helvetica', 'bold');
-        doc.text('Bank Details:', 10, footerY);
-        doc.setFont('helvetica', 'normal');
-        if (companyDetails?.banknames && Array.isArray(companyDetails.banknames) && companyDetails.banknames.length > 0) {
-          companyDetails.banknames.forEach((bank: string, idx: number) => {
-            doc.text(bank, 30, footerY + idx * 5);
-          });
-          footerY += companyDetails.banknames.length * 5;
-        } else if (typeof companyDetails?.banknames === 'string' && companyDetails.banknames) {
-          doc.text(companyDetails.banknames, 30, footerY);
-          footerY += 5;
-        } else if (companyDetails?.companychequename) {
-          doc.text(companyDetails.companychequename, 30, footerY);
-          footerY += 5;
-        } else {
-          doc.text('Not Provided', 30, footerY);
-          footerY += 5;
-        }
-        // Declaration
-        footerY += 2;
-        doc.setFont('helvetica', 'bold');
-        doc.text('Declaration', 10, footerY);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8);
-        doc.text('1. Goods once sold will not be returned. 2. All disputes are subject to KAMAKSHYANAGAR jurisdiction. 3. Payment within 7 days otherwise 18% interest will be charged per annum from the date of invoice.', 10, footerY + 5, { maxWidth: 120 });
-        // Signature
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.text(`for ${companyDetails?.name || ''}`, 150, footerY + 5);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8);
-        doc.text('Authorised Signatory', 170, footerY + 15);
-        // Save/Share
-        const pdfBlob = doc.output('blob');
-        const url = URL.createObjectURL(pdfBlob);
-        setShareUrl(url);
-        // Trigger download
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Invoice_${voucherDetail.number}.pdf`;
-        a.click();
-      } else if (format === 'excel') {
-        const wsData = [
-          ['Tax Invoice', voucherDetail.number],
-          ['Date', voucherDetail.date],
-          ['Customer', voucherDetail.party],
-          ['Amount', voucherDetail.finalAmount],
-          [],
-          ['Item', 'HSN', 'Qty', 'Unit', 'Rate', 'Amount', 'Discount'],
-          ...voucherDetail.items.map(item => [
-            item.stockItem,
-            item.hsn,
-            item.quantity,
-            item.unit,
-            item.rate,
-            item.amount,
-            item.discount || 0
-          ]),
-          [],
-          ['Total GST', voucherDetail.gstDetails.total],
-          ['Grand Total', voucherDetail.finalAmount]
-        ];
-        const ws = XLSX.utils.aoa_to_sheet(wsData);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Invoice');
-        const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-        const blob = new Blob([wbout], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        setShareUrl(url);
-        // Trigger download
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Invoice_${voucherDetail.number}.xlsx`;
-        a.click();
+      console.log('Starting PDF export...');
+      console.log('Company details available:', !!companyDetails);
+      
+      // Check if company details are still loading
+      if (companyLoading) {
+        setError('Company details are still loading. Please wait a moment and try again.');
+        setExporting(false);
+        return;
       }
+      
+      if (!companyDetails && selectedCompany) {
+        setError('Company details are not loaded. Please click the refresh button (🔄) and try again.');
+        setExporting(false);
+        return;
+      }
+      
+      // Clear any previous errors
+      setError(null);
+      
+      // Validate company details before PDF generation
+      const validationErrors = PDFGenerator.validateCompanyDetails(companyDetails);
+      if (validationErrors.length > 0) {
+        console.error('PDF validation failed:', validationErrors);
+        setError(`Cannot generate PDF: ${validationErrors.join(', ')}`);
+        return;
+      }
+
+      console.log('PDF validation passed, generating PDF...');
+
+      // Generate PDF using the modular PDF generator
+      const pdfGenerator = new PDFGenerator();
+      const pdfBlob = await pdfGenerator.generateInvoicePDF({
+        voucher: voucherDetail,
+        companyDetails: companyDetails!,
+        partyDetails,
+        fileName: `Invoice_${voucherDetail.number}.pdf`
+      });
+
+      console.log('PDF generated successfully');
+
+      // Store the PDF blob for sharing
+      setCurrentPdfBlob(pdfBlob);
+
+      // Download the PDF directly
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Invoice_${voucherDetail.number}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+
     } catch (err) {
-      setError('Failed to export file');
+      console.error('Export error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to export PDF');
     } finally {
       setExporting(false);
     }
   };
 
-  const handleShareViaWhatsApp = () => {
-    if (!shareUrl) return;
-    const text = encodeURIComponent(`Invoice for ${voucherDetail?.party} (No. ${voucherDetail?.number})`);
-    window.open(`https://wa.me/?text=${text}%0A${shareUrl}`, '_blank');
+  // Export Excel function
+  const handleExportExcel = async () => {
+    if (!voucherDetail || !companyDetails) {
+      setError('Voucher or company details not available for Excel export');
+      return;
+    }
+    
+    setExcelLoading(true);
+    try {
+      // Create a simple Excel export with voucher data
+      const data = [
+        ['Invoice Details'],
+        ['Number:', voucherDetail.number],
+        ['Date:', voucherDetail.date],
+        ['Party:', voucherDetail.party],
+        ['Amount:', voucherDetail.finalAmount],
+        [''],
+        ['Items:'],
+        ['Description', 'Quantity', 'Rate', 'Amount'],
+        ...voucherDetail.items.map(item => [
+          item.stockItem,
+          item.quantity,
+          item.rate,
+          item.amount
+        ]),
+        [''],
+        ['Total Amount:', voucherDetail.finalAmount]
+      ];
+      
+      // For now, just log the data - you can implement proper Excel generation later
+      console.log('Excel data prepared:', data);
+      alert('Excel export functionality will be implemented soon');
+    } catch (error) {
+      console.error('Error exporting Excel:', error);
+      setError('Failed to export Excel file');
+    } finally {
+      setExcelLoading(false);
+    }
   };
 
-  const handleShareViaEmail = () => {
-    if (!shareUrl) return;
-    const subject = encodeURIComponent(`Invoice #${voucherDetail?.number}`);
-    const body = encodeURIComponent(`Please find attached the invoice. Download: ${shareUrl}`);
-    window.open(`mailto:?subject=${subject}&body=${body}`);
+  // Share PDF via WhatsApp
+  const handleShareWhatsApp = async () => {
+    if (!voucherDetail) {
+      setError('No voucher data available for sharing');
+      return;
+    }
+
+    try {
+      // Create WhatsApp message with invoice details
+      const message = encodeURIComponent(`Hi! 📧
+
+Here's your invoice details:
+
+🧾 *Invoice #${voucherDetail.number}*
+📅 Date: ${voucherDetail.date}
+👤 Customer: ${voucherDetail.party}
+💰 Amount: ₹${voucherDetail.finalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+
+📋 *GST Breakdown:*
+• CGST (${voucherDetail.gstDetails.cgstRate}%): ₹${voucherDetail.gstDetails.cgst.toFixed(2)}
+• SGST (${voucherDetail.gstDetails.sgstRate}%): ₹${voucherDetail.gstDetails.sgst.toFixed(2)}
+${voucherDetail.gstDetails.igst > 0 ? `• IGST (${voucherDetail.gstDetails.igstRate}%): ₹${voucherDetail.gstDetails.igst.toFixed(2)}` : ''}
+• Total GST: ₹${voucherDetail.gstDetails.total.toFixed(2)}
+
+Thank you for your business! 🙏`);
+
+      // Open WhatsApp with the message
+      const whatsappUrl = `https://wa.me/?text=${message}`;
+      window.open(whatsappUrl, '_blank');
+      
+      setShowShareDropdown(false);
+    } catch (err) {
+      console.error('WhatsApp share error:', err);
+      setError('Failed to share via WhatsApp');
+    }
+  };
+
+  // Share PDF via Email
+  const handleShareEmail = async () => {
+    if (!currentPdfBlob || !voucherDetail) {
+      // Generate PDF first if not available
+      await handleExportPDF();
+      if (!currentPdfBlob || !voucherDetail) return;
+    }
+
+    try {
+      const fileName = `Invoice_${voucherDetail!.number}.pdf`;
+      const file = new File([currentPdfBlob], fileName, { type: 'application/pdf' });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        // Use Web Share API if available (works on mobile)
+        await navigator.share({
+          title: `Invoice ${voucherDetail!.number}`,
+          text: `Please find the invoice ${voucherDetail!.number} attached.`,
+          files: [file]
+        });
+      } else {
+        // Fallback: Create mailto URL with invoice details
+        const subject = encodeURIComponent(`Invoice ${voucherDetail!.number} - ₹${voucherDetail!.finalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
+        const body = encodeURIComponent(`Dear Customer,
+
+Please find the invoice details below:
+
+Invoice Number: ${voucherDetail!.number}
+Date: ${voucherDetail!.date}
+Customer: ${voucherDetail!.party}
+Amount: ₹${voucherDetail!.finalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+
+GST Breakdown:
+• CGST (${voucherDetail!.gstDetails.cgstRate}%): ₹${voucherDetail!.gstDetails.cgst.toFixed(2)}
+• SGST (${voucherDetail!.gstDetails.sgstRate}%): ₹${voucherDetail!.gstDetails.sgst.toFixed(2)}
+${voucherDetail!.gstDetails.igst > 0 ? `• IGST (${voucherDetail!.gstDetails.igstRate}%): ₹${voucherDetail!.gstDetails.igst.toFixed(2)}` : ''}
+• Total GST: ₹${voucherDetail!.gstDetails.total.toFixed(2)}
+
+Items:
+${voucherDetail!.items.map(item => `• ${item.stockItem}: ${item.quantity.toFixed(2)} ${item.unit} @ ₹${item.rate.toFixed(2)} = ₹${item.amount.toFixed(2)}`).join('\n')}
+
+Note: Please download the PDF attachment for the complete invoice with detailed formatting.
+
+Best regards,
+${companyDetails?.name || companyDetails?.basiccompanyformalname || 'Your Company'}`);
+        
+        const mailtoUrl = `mailto:?subject=${subject}&body=${body}`;
+        window.open(mailtoUrl);
+        
+        // Also trigger download for manual attachment
+        const url = URL.createObjectURL(currentPdfBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+      setShowShareDropdown(false);
+    } catch (err) {
+      console.error('Email share error:', err);
+      setError('Failed to share via email');
+    }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-hidden mx-4">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg max-w-5xl w-full h-[95vh] flex flex-col overflow-hidden mx-4">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex-shrink-0">
           <div>
             <h2 className="text-xl font-semibold">Tax Invoice Details</h2>
             <p className="text-blue-100">Voucher: {voucherNumber}</p>
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={handleShareClick}
-              className="text-white hover:text-gray-200 transition-colors flex items-center px-3 py-1 rounded-lg border border-white/20 bg-blue-700 hover:bg-blue-800"
-              title="Share or Export"
-              disabled={loading || exporting}
-            >
-              <Share2 className="mr-2" size={20} /> Share
-            </button>
-            <button
               onClick={onClose}
-              className="text-white hover:text-gray-200 transition-colors ml-2"
+              className="text-white hover:text-gray-200 transition-colors"
             >
               <X size={24} />
             </button>
           </div>
         </div>
 
-        {/* Share Options Modal */}
-        {showShareOptions && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-            <div className="bg-white rounded-lg shadow-lg p-8 max-w-xs w-full text-center">
-              <h3 className="text-lg font-semibold mb-4">Export Invoice As</h3>
-              <div className="flex flex-col gap-4">
-                <button
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                  onClick={() => handleExport('pdf')}
-                  disabled={exporting}
-                >
-                  PDF
-                </button>
-                <button
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                  onClick={() => handleExport('excel')}
-                  disabled={exporting}
-                >
-                  Excel
-                </button>
-                <button
-                  className="mt-2 text-gray-500 hover:text-gray-700"
-                  onClick={() => setShowShareOptions(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-
-        {/* Share Actions after export & Live PDF Preview */}
-        {shareUrl && (
-          <>
-            <div className="fixed top-24 right-8 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-4 flex flex-col gap-2">
-              <span className="font-medium text-gray-700 mb-2">Share this file:</span>
-              <button
-                className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
-                onClick={handleShareViaWhatsApp}
-              >
-                WhatsApp
-              </button>
-              <button
-                className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-                onClick={handleShareViaEmail}
-              >
-                Email
-              </button>
-              <a
-                href={shareUrl}
-                download
-                className="px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-center"
-              >
-                Download
-              </a>
-              <button
-                className="mt-1 text-xs text-gray-400 hover:text-gray-600"
-                onClick={() => setShareUrl(null)}
-              >
-                Close
-              </button>
-            </div>
-            {/* Live PDF Preview Section */}
-            <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-4 w-[min(90vw,700px)] max-h-[70vh] flex flex-col items-center">
-              <span className="font-medium text-gray-700 mb-2">Live PDF Preview</span>
-              <iframe
-                src={shareUrl}
-                title="PDF Preview"
-                className="w-full h-[60vh] border rounded-lg shadow"
-                style={{ background: '#f8fafc' }}
-              />
-              <span className="text-xs text-gray-400 mt-2">(Scroll to view full PDF. If blank, try exporting again.)</span>
-            </div>
-          </>
-        )}
-
         {/* Content */}
-        <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
-          {loading && (
+        <div className="flex-1 overflow-y-auto">
+          {(loading || companyLoading) && (
             <div className="flex items-center justify-center p-12">
               <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                <span className="text-lg text-gray-600">Loading voucher details...</span>
-                <p className="text-sm text-gray-500 mt-2">Fetching comprehensive invoice information</p>
+                <Loader2 className="h-16 w-16 animate-spin text-blue-600 mx-auto mb-6" />
+                <span className="text-xl text-gray-700 font-medium">Loading...</span>
+                <p className="text-sm text-gray-500 mt-3">Please wait while we prepare your invoice</p>
               </div>
             </div>
           )}
@@ -617,13 +513,15 @@ export const SimpleVoucherModal: React.FC<SimpleVoucherModalProps> = ({
           {error && (
             <div className="p-8">
               <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+                <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
                 <div className="text-red-600 text-lg font-medium mb-2">Error Loading Voucher</div>
                 <p className="text-red-700">{error}</p>
               </div>
             </div>
           )}
 
-          {voucherDetail && (
+          {/* Only show voucher details when both voucher and company details are loaded */}
+          {voucherDetail && !loading && !companyLoading && companyDetails && (
             <div className="p-6 space-y-6">
               {/* Voucher Header - Beautiful Invoice Style */}
               <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6">
@@ -676,61 +574,100 @@ export const SimpleVoucherModal: React.FC<SimpleVoucherModalProps> = ({
               </div>
 
               {/* Financial Summary Cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                  <div className="text-sm text-green-700 font-medium">Subtotal</div>
-                  <div className="text-xl font-bold text-green-800">₹{voucherDetail.subTotal.toFixed(2)}</div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-xl p-5 text-center shadow-sm hover:shadow-md transition-shadow">
+                  <div className="text-sm text-green-700 font-semibold mb-2">Subtotal</div>
+                  <div className="text-2xl font-bold text-green-800">₹{voucherDetail.subTotal.toFixed(2)}</div>
                 </div>
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-                  <div className="text-sm text-blue-700 font-medium">Total GST</div>
-                  <div className="text-xl font-bold text-blue-800">₹{voucherDetail.gstDetails.total.toFixed(2)}</div>
+                <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-5 text-center shadow-sm hover:shadow-md transition-shadow">
+                  <div className="text-sm text-blue-700 font-semibold mb-2">Total GST</div>
+                  <div className="text-2xl font-bold text-blue-800">₹{voucherDetail.gstDetails.total.toFixed(2)}</div>
                 </div>
-                {voucherDetail.totalDiscount && voucherDetail.totalDiscount > 0 && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
-                    <div className="text-sm text-red-700 font-medium">Discount</div>
-                    <div className="text-xl font-bold text-red-800">₹{voucherDetail.totalDiscount.toFixed(2)}</div>
+                <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-xl p-5 text-center shadow-sm hover:shadow-md transition-shadow">
+                  <div className="text-sm text-purple-700 font-semibold mb-2">Discount</div>
+                  <div className="text-2xl font-bold text-purple-800">
+                    {voucherDetail.totalDiscount && voucherDetail.totalDiscount > 0 
+                      ? `₹${voucherDetail.totalDiscount.toFixed(2)}` 
+                      : '₹0.00'
+                    }
                   </div>
-                )}
-                {voucherDetail.roundOff !== 0 && (
-                  <div className={`${voucherDetail.roundOff > 0 ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'} border rounded-lg p-4 text-center`}>
-                    <div className={`text-sm font-medium ${voucherDetail.roundOff > 0 ? 'text-green-700' : 'text-orange-700'}`}>Round Off</div>
-                    <div className={`text-xl font-bold ${voucherDetail.roundOff > 0 ? 'text-green-800' : 'text-orange-800'}`}>
-                      {voucherDetail.roundOff > 0 ? '+' : ''}₹{voucherDetail.roundOff.toFixed(2)}
-                    </div>
+                </div>
+                <div className="bg-gradient-to-br from-amber-50 to-amber-100 border border-amber-200 rounded-xl p-5 text-center shadow-sm hover:shadow-md transition-shadow">
+                  <div className="text-sm text-amber-700 font-semibold mb-2">Round Off</div>
+                  <div className={`text-2xl font-bold ${voucherDetail.roundOff > 0 ? 'text-green-800' : voucherDetail.roundOff < 0 ? 'text-red-800' : 'text-amber-800'}`}>
+                    {voucherDetail.roundOff !== 0 
+                      ? `${voucherDetail.roundOff > 0 ? '+' : ''}₹${voucherDetail.roundOff.toFixed(2)}`
+                      : '₹0.00'
+                    }
                   </div>
-                )}
+                </div>
               </div>
 
-              {/* GST Breakdown - Indian Style */}
-              <div className="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-xl p-6">
-                <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
-                  <Receipt className="mr-3" size={24} />
-                  GST Breakdown (Indian Standard)
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {voucherDetail.gstDetails.cgst > 0 && (
-                    <div className="bg-white rounded-lg border border-orange-200 p-4 text-center shadow-sm">
-                      <div className="text-sm text-orange-700 font-medium">CGST @ {voucherDetail.gstDetails.cgstRate}%</div>
-                      <div className="text-2xl font-bold text-orange-800">₹{voucherDetail.gstDetails.cgst.toFixed(2)}</div>
-                    </div>
-                  )}
-                  {voucherDetail.gstDetails.sgst > 0 && (
-                    <div className="bg-white rounded-lg border border-orange-200 p-4 text-center shadow-sm">
-                      <div className="text-sm text-orange-700 font-medium">SGST @ {voucherDetail.gstDetails.sgstRate}%</div>
-                      <div className="text-2xl font-bold text-orange-800">₹{voucherDetail.gstDetails.sgst.toFixed(2)}</div>
-                    </div>
-                  )}
-                  {voucherDetail.gstDetails.igst > 0 && (
-                    <div className="bg-white rounded-lg border border-orange-200 p-4 text-center shadow-sm">
-                      <div className="text-sm text-orange-700 font-medium">IGST @ {voucherDetail.gstDetails.igstRate}%</div>
-                      <div className="text-2xl font-bold text-orange-800">₹{voucherDetail.gstDetails.igst.toFixed(2)}</div>
-                    </div>
-                  )}
+              {/* GST Breakdown */}
+              <div className="bg-gradient-to-r from-orange-50 via-red-50 to-pink-50 border border-orange-200 rounded-xl p-6 shadow-sm">
+                <div className="text-center mb-6">
+                  <h3 className="text-xl font-bold text-gray-900 flex items-center justify-center">
+                    <Receipt className="mr-3 text-orange-600" size={24} />
+                    GST Breakdown
+                  </h3>
                 </div>
-                <div className="mt-4 text-center">
-                  <div className="text-sm text-gray-600 mb-1">Total GST Amount</div>
-                  <div className="text-3xl font-bold text-orange-600">
+                
+                {/* GST Type Cards */}
+                <div className="flex justify-center mb-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
+                    <div className="bg-white rounded-xl border-2 border-orange-200 p-6 text-center shadow-md hover:shadow-lg transition-shadow">
+                      <div className="text-sm text-orange-700 font-semibold mb-3 uppercase tracking-wide">
+                        CGST @ {voucherDetail.gstDetails.cgstRate || 9}%
+                      </div>
+                      <div className="text-3xl font-bold text-orange-800 mb-2">
+                        ₹{voucherDetail.gstDetails.cgst.toFixed(2)}
+                      </div>
+                      <div className="text-xs text-orange-600 bg-orange-100 px-2 py-1 rounded-full">
+                        Central GST
+                      </div>
+                    </div>
+                    
+                    <div className="bg-white rounded-xl border-2 border-red-200 p-6 text-center shadow-md hover:shadow-lg transition-shadow">
+                      <div className="text-sm text-red-700 font-semibold mb-3 uppercase tracking-wide">
+                        SGST @ {voucherDetail.gstDetails.sgstRate || 9}%
+                      </div>
+                      <div className="text-3xl font-bold text-red-800 mb-2">
+                        ₹{voucherDetail.gstDetails.sgst.toFixed(2)}
+                      </div>
+                      <div className="text-xs text-red-600 bg-red-100 px-2 py-1 rounded-full">
+                        State GST
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* IGST Card (if applicable) */}
+                {voucherDetail.gstDetails.igst > 0 && (
+                  <div className="flex justify-center mb-6">
+                    <div className="max-w-sm w-full">
+                      <div className="bg-white rounded-xl border-2 border-purple-200 p-6 text-center shadow-md hover:shadow-lg transition-shadow">
+                        <div className="text-sm text-purple-700 font-semibold mb-3 uppercase tracking-wide">
+                          IGST @ {voucherDetail.gstDetails.igstRate}%
+                        </div>
+                        <div className="text-3xl font-bold text-purple-800 mb-2">
+                          ₹{voucherDetail.gstDetails.igst.toFixed(2)}
+                        </div>
+                        <div className="text-xs text-purple-600 bg-purple-100 px-2 py-1 rounded-full">
+                          Integrated GST
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Total GST Amount */}
+                <div className="bg-gradient-to-r from-orange-100 to-red-100 border border-orange-300 rounded-xl p-6 text-center">
+                  <div className="text-sm text-gray-700 font-semibold mb-2 uppercase tracking-wide">Total GST Amount</div>
+                  <div className="text-4xl font-bold text-orange-700 mb-2">
                     ₹{voucherDetail.gstDetails.total.toFixed(2)}
+                  </div>
+                  <div className="text-sm text-orange-600">
+                    ({((voucherDetail.gstDetails.total / voucherDetail.taxableAmount) * 100).toFixed(1)}% of taxable amount)
                   </div>
                 </div>
               </div>
@@ -889,7 +826,77 @@ export const SimpleVoucherModal: React.FC<SimpleVoucherModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
+        <div className="flex justify-between items-center p-6 border-t border-gray-200 bg-gray-50 flex-shrink-0">
+          <div className="flex items-center gap-4">
+            {/* Only show export/share buttons when company details are loaded */}
+            {companyDetails && !companyLoading && voucherDetail ? (
+              <>
+                {/* Export PDF Button */}
+                <button
+                  onClick={handleExportPDF}
+                  disabled={exporting}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {exporting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FileText className="w-4 h-4" />
+                  )}
+                  {exporting ? 'Generating...' : 'Export PDF'}
+                </button>
+
+                {/* Export Excel Button */}
+                <button
+                  onClick={handleExportExcel}
+                  disabled={excelLoading}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {excelLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FileSpreadsheet className="w-4 h-4" />
+                  )}
+                  {excelLoading ? 'Generating...' : 'Export Excel'}
+                </button>
+
+                {/* Share Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowShareDropdown(!showShareDropdown)}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    Share
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+
+                  {showShareDropdown && (
+                    <div className="absolute bottom-full mb-2 left-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-[150px]">
+                      <button
+                        onClick={handleShareWhatsApp}
+                        className="flex items-center gap-2 w-full px-4 py-2 text-left hover:bg-green-50 text-green-700 border-b border-gray-100"
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                        WhatsApp
+                      </button>
+                      <button
+                        onClick={handleShareEmail}
+                        className="flex items-center gap-2 w-full px-4 py-2 text-left hover:bg-blue-50 text-blue-700"
+                      >
+                        <Mail className="w-4 h-4" />
+                        Email
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-gray-500">
+                {(loading || companyLoading) ? 'Loading...' : 'Export options will appear once data is loaded'}
+              </div>
+            )}
+          </div>
+
           <button
             onClick={onClose}
             className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
@@ -897,6 +904,52 @@ export const SimpleVoucherModal: React.FC<SimpleVoucherModalProps> = ({
             Close
           </button>
         </div>
+
+        {/* Show when voucher is loaded but company details are missing */}
+        {voucherDetail && !loading && !companyLoading && !companyDetails && (
+          <div className="p-8">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
+              <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
+              <div className="text-amber-700 text-lg font-medium mb-2">Company Details Required</div>
+              <p className="text-amber-600 mb-4">
+                Voucher details loaded successfully, but company information is needed for PDF generation.
+              </p>
+              <button
+                onClick={() => {
+                  if (selectedCompany) {
+                    const api = new CompanyApiService();
+                    setCompanyDetails(null);
+                    setCompanyLoading(true);
+                    setCompanyLoadAttempted(true);
+                    api.getCompanyDetails(selectedCompany).then(details => {
+                      if (!details) {
+                        setCompanyDetails(null);
+                        setCompanyLoading(false);
+                        return;
+                      }
+                      const toCamel = (str: string) => str.toLowerCase().replace(/[-_\.]+(.)?/g, (_, c) => c ? c.toUpperCase() : '').replace(/^([a-z])/, (m) => m.toLowerCase());
+                      const normalizeKeys = (obj: any): any => {
+                        if (!obj || typeof obj !== 'object') return obj;
+                        if (Array.isArray(obj)) return obj.map((v: any) => normalizeKeys(v));
+                        return Object.fromEntries(Object.entries(obj).map(([k, v]) => [toCamel(k), normalizeKeys(v)]));
+                      };
+                      const normalizedDetails = normalizeKeys(details);
+                      setCompanyDetails(normalizedDetails);
+                      setCompanyLoading(false);
+                    }).catch(error => {
+                      console.error('Error loading company details:', error);
+                      setCompanyDetails(null);
+                      setCompanyLoading(false);
+                    });
+                  }
+                }}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+              >
+                Load Company Details
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
