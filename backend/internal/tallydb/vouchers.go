@@ -9,20 +9,24 @@ const AmountDivisor = 100000.0
 
 // Voucher is a transaction record.
 type Voucher struct {
-	Number      string        `json:"number,omitempty"`
-	Date        string        `json:"date,omitempty"`
-	Type        string        `json:"type,omitempty"`
-	Party       string        `json:"party,omitempty"`
-	GSTIN       string        `json:"gstin,omitempty"`
-	State       string        `json:"state,omitempty"`
-	PlaceOfSupply string      `json:"place_of_supply,omitempty"`
-	SellerGSTIN string        `json:"seller_gstin,omitempty"`
-	Address     []string      `json:"address,omitempty"`
-	Narration   string        `json:"narration,omitempty"`
-	Amount      float64       `json:"amount,omitempty"`
-	TaxAmount   float64       `json:"tax_amount,omitempty"`
-	Items       []VoucherItem `json:"items,omitempty"`
-	VoucherID   string        `json:"voucher_id,omitempty"`
+	Number        string        `json:"number,omitempty"`
+	Date          string        `json:"date,omitempty"`
+	Type          string        `json:"type,omitempty"`
+	Party         string        `json:"party,omitempty"`
+	GSTIN         string        `json:"gstin,omitempty"`
+	State         string        `json:"state,omitempty"`
+	PlaceOfSupply string        `json:"place_of_supply,omitempty"`
+	SellerGSTIN   string        `json:"seller_gstin,omitempty"`
+	Address       []string      `json:"address,omitempty"`
+	Narration     string        `json:"narration,omitempty"`
+	Amount        float64       `json:"amount,omitempty"`
+	TaxAmount     float64       `json:"tax_amount,omitempty"`
+	Items         []VoucherItem `json:"items,omitempty"`
+	VoucherID     string        `json:"voucher_id,omitempty"`
+	EInvoiceIRN   string        `json:"e_invoice_irn,omitempty"`
+	EWayBillNo    string        `json:"eway_bill_no,omitempty"`
+	VehicleNo     string        `json:"vehicle_no,omitempty"`
+	DocType       string        `json:"document_type,omitempty"`
 }
 
 // VoucherItem is a line item in a voucher.
@@ -202,6 +206,8 @@ func enrichVoucher(v *Voucher, fields []Field) {
 				}
 			case 0x000A: // voucher unique ID
 				if v.VoucherID == "" { v.VoucherID = f.Str }
+			case 0x002D: // e-Invoice IRN
+				if v.EInvoiceIRN == "" && len(f.Str) > 10 { v.EInvoiceIRN = f.Str }
 			}
 		}
 		// Extract voucher type from compound string field
