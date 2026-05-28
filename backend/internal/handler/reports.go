@@ -53,3 +53,33 @@ func (h *ReportHandler) ProfitLoss(w http.ResponseWriter, r *http.Request) {
 		"net_profit":    totalSales - totalExpenses,
 	})
 }
+
+func (h *ReportHandler) LedgerBalances(w http.ResponseWriter, r *http.Request) {
+	folder := h.CompanyFolder(r)
+	data, err := h.DB.ComputeLedgerBalances(folder)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, data)
+}
+
+func (h *ReportHandler) Outstanding(w http.ResponseWriter, r *http.Request) {
+	folder := h.CompanyFolder(r)
+	data, err := h.DB.ComputeOutstanding(folder)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, data)
+}
+
+func (h *ReportHandler) StockBalance(w http.ResponseWriter, r *http.Request) {
+	folder := h.CompanyFolder(r)
+	data, err := h.DB.ComputeStockBalance(folder)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, data)
+}
