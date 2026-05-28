@@ -10,20 +10,19 @@ import (
 
 // Company holds details from Company.1800/.900.
 type Company struct {
-	Name      string `json:"name"`
-	Folder    string `json:"folder,omitempty"`
-	Email     string `json:"email,omitempty"`
-	Phone     string `json:"phone,omitempty"`
-	Mobile    string `json:"mobile,omitempty"`
-	Fax       string `json:"fax,omitempty"`
-	Website   string `json:"website,omitempty"`
-	State     string `json:"state,omitempty"`
-	Country   string `json:"country,omitempty"`
-	Pincode   string `json:"pincode,omitempty"`
-	GSTIN     string `json:"gstin,omitempty"`
-	PAN       string `json:"pan,omitempty"`
-	Address   string `json:"address,omitempty"`
-	BooksFrom string `json:"books_from,omitempty"`
+	Name        string   `json:"name"`
+	Folder      string   `json:"folder,omitempty"`
+	Address     []string `json:"address,omitempty"`
+	Email       string   `json:"email,omitempty"`
+	Phone       string   `json:"phone,omitempty"`
+	State       string   `json:"state,omitempty"`
+	Country     string   `json:"country,omitempty"`
+	Pincode     string   `json:"pincode,omitempty"`
+	GSTIN       string   `json:"gstin,omitempty"`
+	PAN         string   `json:"pan,omitempty"`
+	Proprietor  string   `json:"proprietor,omitempty"`
+	Designation string   `json:"designation,omitempty"`
+	FirmName    string   `json:"firm_name,omitempty"`
 }
 
 // DB is the main interface to read Tally data from files.
@@ -77,53 +76,51 @@ func (db *DB) GetCompanyInfo(folderName string) (*Company, error) {
 				continue
 			}
 			switch f.ID {
-			case FldCompanyName:
-				c.Name = f.Str
-			case 0x001B: // display name (fallback)
+			case 0x001B: // Company name
 				if c.Name == "" {
 					c.Name = f.Str
 				}
-			case 0x0009: // email
+			case 0x001D: // Address lines
+				c.Address = append(c.Address, f.Str)
+			case 0x0066: // Email
 				if c.Email == "" {
 					c.Email = f.Str
 				}
-			case 0x0006: // phone
-				if c.Phone == "" {
-					c.Phone = f.Str
-				}
-			case 0x0008: // mobile
-				if c.Mobile == "" {
-					c.Mobile = f.Str
-				}
-			case 0x0007: // fax
-				if c.Fax == "" {
-					c.Fax = f.Str
-				}
-			case 0x000A: // website
-				if c.Website == "" {
-					c.Website = f.Str
-				}
-			case 0x0067, FldGSTState: // state
-				if c.State == "" && len(f.Str) > 2 {
+			case 0x0067: // State
+				if c.State == "" {
 					c.State = f.Str
 				}
-			case 0x00D2, FldCountry: // country
-				if c.Country == "" && len(f.Str) > 2 {
-					c.Country = f.Str
-				}
-			case 0x0C82, FldGSTIN: // GSTIN
-				if c.GSTIN == "" {
-					c.GSTIN = f.Str
-				}
-			case FldPAN:
-				c.PAN = f.Str
-			case FldPin:
+			case 0x0068: // Pincode
 				if c.Pincode == "" {
 					c.Pincode = f.Str
 				}
-			case FldAddr: // 0x0003
-				if c.Address == "" {
-					c.Address = f.Str
+			case 0x00CA: // PAN
+				if c.PAN == "" {
+					c.PAN = f.Str
+				}
+			case 0x00D2: // Country
+				if c.Country == "" {
+					c.Country = f.Str
+				}
+			case 0x09C8: // Phone
+				if c.Phone == "" {
+					c.Phone = f.Str
+				}
+			case 0x0284: // Proprietor name
+				if c.Proprietor == "" {
+					c.Proprietor = f.Str
+				}
+			case 0x0286: // Designation
+				if c.Designation == "" {
+					c.Designation = f.Str
+				}
+			case 0x026F: // Firm name
+				if c.FirmName == "" {
+					c.FirmName = f.Str
+				}
+			case 0x0C82, FldGSTIN: // GSTIN
+				if c.GSTIN == "" && len(f.Str) == 15 {
+					c.GSTIN = f.Str
 				}
 			}
 		}
@@ -188,6 +185,142 @@ func (db *DB) createMaster(folderName, templateName, newName string) (uint32, er
 
 func (db *DB) GetVouchers(folderName string) ([]Voucher, error) {
 	return ParseVouchers(db.CompanyDir(folderName))
+}
+
+// GetUnits returns all measurement units.
+func (db *DB) GetUnits(folderName string) ([]Unit, error) {
+	m, err := db.GetMasters(folderName)
+	if err != nil {
+		return nil, err
+	}
+	return m.Units, nil
+}
+
+// GetVouchersByType filters vouchers by type.
+func (db *DB) GetVouchersByType(folderName, vtype string) ([]Voucher, error) {
+	all, err := db.GetVouchers(folderName)
+	if err != nil {
+		return nil, err
+	}
+	if vtype == "" {
+		return all, nil
+	}
+	var filtered []Voucher
+	for _, v := range all {
+		if strings.EqualFold(v.Type, vtype) {
+			filtered = append(filtered, v)
+		}
+	}
+	return filtered, nil
+}
+
+// GetVouchersByParty returns all vouchers for a given party/ledger.
+func (db *DB) GetVouchersByParty(folderName, party string) []Voucher {
+	all, err := db.GetVouchers(folderName)
+	if err != nil {
+		return nil
+	}
+	var result []Voucher
+	for _, v := range all {
+		if strings.EqualFold(v.Party, party) {
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
+// TrialBalance returns debit/credit totals per party.
+type TrialBalanceEntry struct {
+	Ledger string  `json:"ledger"`
+	Debit  float64 `json:"debit"`
+	Credit float64 `json:"credit"`
+}
+
+func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
+	vouchers, err := db.GetVouchers(folderName)
+	if err != nil {
+		return nil, err
+	}
+	balances := make(map[string]*TrialBalanceEntry)
+	for _, v := range vouchers {
+		if v.Party == "" || v.Amount == 0 {
+			continue
+		}
+		e, ok := balances[v.Party]
+		if !ok {
+			e = &TrialBalanceEntry{Ledger: v.Party}
+			balances[v.Party] = e
+		}
+		e.Debit += v.Amount
+	}
+	var result []TrialBalanceEntry
+	for _, e := range balances {
+		result = append(result, *e)
+	}
+	return result, nil
+}
+
+// GSTEntry is a GST summary line.
+type GSTEntry struct {
+	HSN       string  `json:"hsn"`
+	Rate      float64 `json:"gst_rate"`
+	Taxable   float64 `json:"taxable_value"`
+	CGST      float64 `json:"cgst"`
+	SGST      float64 `json:"sgst"`
+	IGST      float64 `json:"igst"`
+	ItemCount int     `json:"item_count"`
+}
+
+func (db *DB) GetGSTR1Summary(folderName string) ([]GSTEntry, error) {
+	vouchers, err := db.GetVouchers(folderName)
+	if err != nil {
+		return nil, err
+	}
+	type key struct{ hsn string; rate float64 }
+	agg := make(map[key]*GSTEntry)
+	for _, v := range vouchers {
+		for _, item := range v.Items {
+			if item.HSN == "" || item.Amount == 0 {
+				continue
+			}
+			// Validate HSN: must be numeric 4-8 digits
+			if len(item.HSN) < 4 || len(item.HSN) > 8 {
+				continue
+			}
+			isNumeric := true
+			for _, c := range item.HSN {
+				if c < '0' || c > '9' { isNumeric = false; break }
+			}
+			if !isNumeric {
+				continue
+			}
+			// Validate GST rate: must be 0, 5, 12, 18, or 28
+			rate := item.GSTRate
+			if rate != 0 && rate != 5 && rate != 12 && rate != 18 && rate != 28 && rate != 9 && rate != 14 && rate != 6 {
+				continue
+			}
+			k := key{item.HSN, rate}
+			e, ok := agg[k]
+			if !ok {
+				e = &GSTEntry{HSN: item.HSN, Rate: rate}
+				agg[k] = e
+			}
+			e.Taxable += item.Amount
+			tax := item.Amount * rate / 100
+			if v.State == "Odisha" {
+				e.CGST += tax / 2
+				e.SGST += tax / 2
+			} else {
+				e.IGST += tax
+			}
+			e.ItemCount++
+		}
+	}
+	var result []GSTEntry
+	for _, e := range agg {
+		result = append(result, *e)
+	}
+	return result, nil
 }
 
 // FindDataPath auto-detects the Tally data path from tally.ini.

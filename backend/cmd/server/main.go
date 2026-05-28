@@ -70,6 +70,8 @@ func main() {
 	stock := &handler.StockHandler{Base: base}
 	vouchers := &handler.VoucherHandler{Base: base}
 	dashboard := &handler.DashboardHandler{Base: base}
+	units := &handler.UnitHandler{Base: base}
+	reports := &handler.ReportHandler{Base: base}
 
 	mux := http.NewServeMux()
 
@@ -79,11 +81,16 @@ func main() {
 	mux.HandleFunc("GET /api/dashboard/overview", dashboard.Overview)
 	mux.HandleFunc("GET /api/ledgers", ledgers.List)
 	mux.HandleFunc("POST /api/ledgers", ledgers.Create)
+	mux.HandleFunc("GET /api/ledgers/{name}/vouchers", vouchers.ByParty)
 	mux.HandleFunc("GET /api/groups", groups.List)
 	mux.HandleFunc("POST /api/groups", groups.Create)
 	mux.HandleFunc("GET /api/stock-items", stock.ListItems)
 	mux.HandleFunc("POST /api/stock-items", stock.CreateItem)
+	mux.HandleFunc("GET /api/units", units.List)
 	mux.HandleFunc("GET /api/vouchers", vouchers.List)
+	mux.HandleFunc("GET /api/reports/trial-balance", reports.TrialBalance)
+	mux.HandleFunc("GET /api/reports/profit-loss", reports.ProfitLoss)
+	mux.HandleFunc("GET /api/reports/gstr-1", reports.GSTR1)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	log.Printf("TallyWeb starting on %s (file-based mode)", addr)

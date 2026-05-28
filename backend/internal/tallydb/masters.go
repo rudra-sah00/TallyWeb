@@ -41,6 +41,13 @@ type Masters struct {
 	Groups     []Group     `json:"groups"`
 	Ledgers    []Ledger    `json:"ledgers"`
 	StockItems []StockItem `json:"stock_items"`
+	Units      []Unit      `json:"units"`
+}
+
+// Unit is a measurement unit (PCS, KG, LTR etc.)
+type Unit struct {
+	Name   string `json:"name"`
+	Symbol string `json:"symbol,omitempty"`
 }
 
 // ParseMasters reads Manager.1800/.900 and extracts all master records.
@@ -55,34 +62,36 @@ func ParseMasters(dataDir string) (*Masters, error) {
 	}
 
 	m := &Masters{}
+	seenGroups := make(map[string]bool)
+	seenUnits := make(map[string]bool)
 	for _, page := range pages {
 		fields := page.Fields
 
 		if hasField(fields, FldLedgerName) {
-			// Determine if it's a ledger, voucher type, currency, unit, or stock item
 			name := getFieldStr(fields, FldLedgerName)
-			
-			// Stock items have HSN (0x0003 with numeric-looking value) or unit field (0x1132)
+
 			if hasField(fields, 0x1132) || hasField(fields, 0x0FD4) {
-				// Unit definition
+				if name != "" && !seenUnits[name] {
+					seenUnits[name] = true
+					m.Units = append(m.Units, Unit{Name: name, Symbol: name})
+				}
 				continue
 			}
-			
-			// Voucher types are short names like "Sale", "Purc", "Rcpt", "Pymt", "Jrnl", "C/Note"
+
 			if isVoucherTypeName(name) || isCurrencyName(name) {
 				continue
 			}
 
 			m.Ledgers = append(m.Ledgers, parseLedger(fields))
-		} else if hasField(fields, FldName) {
+		} else if page.Header.ObjType == 0x000B && page.Header.PageIdx == 2 && hasField(fields, FldName) {
 			g := parseGroup(fields)
-			if g.Name != "" {
+			if g.Name != "" && !seenGroups[g.Name] {
+				seenGroups[g.Name] = true
 				m.Groups = append(m.Groups, g)
 			}
 		}
 	}
 
-	// Extract stock items from TranMgr (they appear as item lines in vouchers)
 	m.StockItems = extractStockItems(dataDir)
 
 	return m, nil

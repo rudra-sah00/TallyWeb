@@ -95,6 +95,9 @@ func (w *Writer) findAnyLedger() int {
 // findChainTail finds the last pidx=2, type=0x000B page where [62]=0.
 func (w *Writer) findChainTail(skipPage int) int {
 	total := w.totalPages()
+	if total < 4 {
+		return -1
+	}
 	for pn := total - 1; pn > 0; pn-- {
 		if pn == skipPage {
 			continue
@@ -114,6 +117,10 @@ func (w *Writer) findChainTail(skipPage int) int {
 // incrementCounters increments [34] on group-level 0x0042 pages.
 func (w *Writer) incrementCounters() {
 	total := w.totalPages()
+	if total < 4 {
+		return
+	}
+	found := 0
 	for pn := total / 2; pn < total; pn++ {
 		page := w.data[pn*PageSize : (pn+1)*PageSize]
 		otype := binary.LittleEndian.Uint16(page[16:18])
@@ -129,12 +136,19 @@ func (w *Writer) incrementCounters() {
 				binary.LittleEndian.PutUint32(page[44:48], val44+1)
 			}
 			SetPageChecksum(w.data[pn*PageSize:(pn+1)*PageSize], pn)
+			found++
+			if found >= 4 {
+				break
+			}
 		}
 	}
 }
 
 func (w *Writer) replaceName(pn int, oldU16, newU16 []byte) {
 	page := w.data[pn*PageSize : (pn+1)*PageSize]
+	if bytes.Equal(oldU16, newU16) {
+		return
+	}
 	for {
 		idx := bytes.Index(page, oldU16)
 		if idx < 0 {
