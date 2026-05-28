@@ -9,16 +9,20 @@ const AmountDivisor = 100000.0
 
 // Voucher is a transaction record.
 type Voucher struct {
-	Number    string        `json:"number,omitempty"`
-	Date      string        `json:"date,omitempty"`
-	Type      string        `json:"type,omitempty"`
-	Party     string        `json:"party,omitempty"`
-	GSTIN     string        `json:"gstin,omitempty"`
-	State     string        `json:"state,omitempty"`
-	Narration string        `json:"narration,omitempty"`
-	Amount    float64       `json:"amount,omitempty"`
-	TaxAmount float64       `json:"tax_amount,omitempty"`
-	Items     []VoucherItem `json:"items,omitempty"`
+	Number      string        `json:"number,omitempty"`
+	Date        string        `json:"date,omitempty"`
+	Type        string        `json:"type,omitempty"`
+	Party       string        `json:"party,omitempty"`
+	GSTIN       string        `json:"gstin,omitempty"`
+	State       string        `json:"state,omitempty"`
+	PlaceOfSupply string      `json:"place_of_supply,omitempty"`
+	SellerGSTIN string        `json:"seller_gstin,omitempty"`
+	Address     []string      `json:"address,omitempty"`
+	Narration   string        `json:"narration,omitempty"`
+	Amount      float64       `json:"amount,omitempty"`
+	TaxAmount   float64       `json:"tax_amount,omitempty"`
+	Items       []VoucherItem `json:"items,omitempty"`
+	VoucherID   string        `json:"voucher_id,omitempty"`
 }
 
 // VoucherItem is a line item in a voucher.
@@ -152,6 +156,22 @@ func enrichVoucher(v *Voucher, fields []Field) {
 				if v.Party == "" { v.Party = f.Str }
 			case 0x03F4: // narration/reference
 				if v.Narration == "" { v.Narration = f.Str }
+			case 0x0213: // seller GSTIN
+				if v.SellerGSTIN == "" && len(f.Str) == 15 { v.SellerGSTIN = f.Str }
+			case 0x0212: // place of supply
+				if v.PlaceOfSupply == "" && len(f.Str) > 2 { v.PlaceOfSupply = f.Str }
+			case 0x0025, 0x0017, 0x03EE, 0x00CF: // buyer address lines
+				if f.Str != "" && len(f.Str) > 2 {
+					dup := false
+					for _, a := range v.Address {
+						if a == f.Str { dup = true; break }
+					}
+					if !dup && len(v.Address) < 5 {
+						v.Address = append(v.Address, f.Str)
+					}
+				}
+			case 0x000A: // voucher unique ID
+				if v.VoucherID == "" { v.VoucherID = f.Str }
 			}
 		}
 		// Date field (type 0x0D): days since 1900-01-01

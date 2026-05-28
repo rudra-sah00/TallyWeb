@@ -125,6 +125,16 @@ func ParseMasters(dataDir string) (*Masters, error) {
 				if l.Country == "" { l.Country = f.Str }
 			case 0x0A90:
 				if l.Email == "" { l.Email = f.Str }
+			case 0x0003: // address line 1
+				if len(f.Str) > 3 && len(l.Address) < 4 {
+					l.Address = append(l.Address, f.Str)
+				}
+			case 0x0006: // address line 2
+				if len(f.Str) > 3 && len(l.Address) < 4 {
+					l.Address = append(l.Address, f.Str)
+				}
+			case 0x0005: // pincode (from pidx=0)
+				if l.Pincode == "" && len(f.Str) == 6 { l.Pincode = f.Str }
 			}
 		}
 	}
