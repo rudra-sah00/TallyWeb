@@ -3,6 +3,7 @@ package tallydb
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Group is a Tally account group.
@@ -14,19 +15,24 @@ type Group struct {
 
 // Ledger is a Tally ledger account.
 type Ledger struct {
-	Name       string   `json:"name"`
-	Parent     string   `json:"parent,omitempty"`
-	Address    []string `json:"address,omitempty"`
-	Email      string   `json:"email,omitempty"`
-	Phone      string   `json:"phone,omitempty"`
-	Contact    string   `json:"contact,omitempty"`
-	PAN        string   `json:"pan,omitempty"`
-	GSTIN      string   `json:"gstin,omitempty"`
-	State      string   `json:"state,omitempty"`
-	Pincode    string   `json:"pincode,omitempty"`
-	DealerType string   `json:"dealer_type,omitempty"`
-	BankAcc    string   `json:"bank_account,omitempty"`
-	Country    string   `json:"country,omitempty"`
+	Name         string   `json:"name"`
+	Parent       string   `json:"parent,omitempty"`
+	Address      []string `json:"address,omitempty"`
+	Email        string   `json:"email,omitempty"`
+	Phone        string   `json:"phone,omitempty"`
+	Contact      string   `json:"contact,omitempty"`
+	PAN          string   `json:"pan,omitempty"`
+	GSTIN        string   `json:"gstin,omitempty"`
+	State        string   `json:"state,omitempty"`
+	Pincode      string   `json:"pincode,omitempty"`
+	DealerType   string   `json:"dealer_type,omitempty"`
+	BankAcc      string   `json:"bank_account,omitempty"`
+	Country      string   `json:"country,omitempty"`
+	PriceList    string   `json:"price_list,omitempty"`
+	CreditPeriod string   `json:"credit_period,omitempty"`
+	OpeningBal   int64    `json:"opening_balance,omitempty"`
+	CreatedDate  string   `json:"created_date,omitempty"`
+	LastVchDate  string   `json:"last_voucher_date,omitempty"`
 }
 
 // StockItem is a Tally stock/inventory item.
@@ -135,6 +141,27 @@ func ParseMasters(dataDir string) (*Masters, error) {
 				}
 			case 0x0005: // pincode (from pidx=0)
 				if l.Pincode == "" && len(f.Str) == 6 { l.Pincode = f.Str }
+			case 0x0A2D: // price list
+				if l.PriceList == "" { l.PriceList = f.Str }
+			case 0x0BBB: // credit period
+				if l.CreditPeriod == "" { l.CreditPeriod = f.Str }
+			}
+		}
+		// Numeric fields
+		for _, f := range page.Fields {
+			if f.Type == 'I' && f.ID == 0x01F8 && l.OpeningBal == 0 {
+				l.OpeningBal = int64(f.Int32)
+			}
+			if f.Type == 'D' {
+				days := int(f.Int32) - 2
+				t := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, days)
+				ds := t.Format("02-01-2006")
+				switch f.ID {
+				case 0x0067:
+					if l.CreatedDate == "" { l.CreatedDate = ds }
+				case 0x0A2B:
+					if l.LastVchDate == "" { l.LastVchDate = ds }
+				}
 			}
 		}
 	}
