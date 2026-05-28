@@ -24,6 +24,16 @@ func (h *ReportHandler) GSTR1(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, gst)
 }
 
+func (h *ReportHandler) GSTReturns(w http.ResponseWriter, r *http.Request) {
+	folder := h.CompanyFolder(r)
+	data, err := h.DB.GetGSTReturns(folder)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, data)
+}
+
 func (h *ReportHandler) ProfitLoss(w http.ResponseWriter, r *http.Request) {
 	folder := h.CompanyFolder(r)
 	vouchers, err := h.DB.GetVouchers(folder)

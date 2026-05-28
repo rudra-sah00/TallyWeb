@@ -192,6 +192,11 @@ func (db *DB) GetBankEntries(folderName string) ([]BankEntry, error) {
 	return ParseBankEntries(db.CompanyDir(folderName))
 }
 
+// GetGSTReturns returns pre-computed GST data from Aggr.1800.
+func (db *DB) GetGSTReturns(folderName string) ([]GSTReturn, error) {
+	return ParseGSTReturns(db.CompanyDir(folderName))
+}
+
 // GetUnits returns all measurement units.
 func (db *DB) GetUnits(folderName string) ([]Unit, error) {
 	m, err := db.GetMasters(folderName)
