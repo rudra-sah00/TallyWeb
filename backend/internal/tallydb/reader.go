@@ -31,7 +31,7 @@ type PageHeader struct {
 // Field is a decoded field from a page.
 type Field struct {
 	ID    uint16
-	Type  byte // 'S' = string, 'I' = int32, 'L' = int64
+	Type  byte // 'S' = string, 'I' = int32, 'L' = int64, 'D' = date (days since 1900)
 	Str   string
 	Int32 int32
 	Int64 int64
@@ -130,6 +130,15 @@ func decodeFields(page []byte) []Field {
 				val := int32(binary.LittleEndian.Uint32(page[i+4 : i+8]))
 				if val != 0 {
 					fields = append(fields, Field{ID: fid, Type: 'I', Int32: val})
+				}
+				i += 8
+				continue
+			}
+			// Date field: [fid LE16] 00 0D [days LE32] (days since 1900-01-01)
+			if fid > 0 && fid < 0x5000 && page[i+2] == 0x00 && page[i+3] == 0x0D {
+				val := int32(binary.LittleEndian.Uint32(page[i+4 : i+8]))
+				if val > 40000 && val < 55000 { // reasonable date range 2009-2050
+					fields = append(fields, Field{ID: fid, Type: 'D', Int32: val})
 				}
 				i += 8
 				continue

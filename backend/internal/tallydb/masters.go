@@ -14,17 +14,19 @@ type Group struct {
 
 // Ledger is a Tally ledger account.
 type Ledger struct {
-	Name    string   `json:"name"`
-	Parent  string   `json:"parent"`
-	GUID    string   `json:"guid,omitempty"`
-	Address []string `json:"address,omitempty"`
-	Email   string   `json:"email,omitempty"`
-	Phone   string   `json:"phone,omitempty"`
-	Contact string   `json:"contact,omitempty"`
-	PAN     string   `json:"pan,omitempty"`
-	GSTIN   string   `json:"gstin,omitempty"`
-	State   string   `json:"state,omitempty"`
-	Pincode string   `json:"pincode,omitempty"`
+	Name       string   `json:"name"`
+	Parent     string   `json:"parent,omitempty"`
+	Address    []string `json:"address,omitempty"`
+	Email      string   `json:"email,omitempty"`
+	Phone      string   `json:"phone,omitempty"`
+	Contact    string   `json:"contact,omitempty"`
+	PAN        string   `json:"pan,omitempty"`
+	GSTIN      string   `json:"gstin,omitempty"`
+	State      string   `json:"state,omitempty"`
+	Pincode    string   `json:"pincode,omitempty"`
+	DealerType string   `json:"dealer_type,omitempty"`
+	BankAcc    string   `json:"bank_account,omitempty"`
+	Country    string   `json:"country,omitempty"`
 }
 
 // StockItem is a Tally stock/inventory item.
@@ -64,27 +66,73 @@ func ParseMasters(dataDir string) (*Masters, error) {
 	m := &Masters{}
 	seenGroups := make(map[string]bool)
 	seenUnits := make(map[string]bool)
+
+	// First pass: collect ledger names by seq (from pidx=2 pages)
+	ledgerSeqs := make(map[uint32]int) // seq -> index in m.Ledgers
 	for _, page := range pages {
 		fields := page.Fields
+		if !hasField(fields, FldLedgerName) {
+			continue
+		}
+		name := getFieldStr(fields, FldLedgerName)
+		if hasField(fields, 0x1132) || hasField(fields, 0x0FD4) {
+			if name != "" && !seenUnits[name] {
+				seenUnits[name] = true
+				m.Units = append(m.Units, Unit{Name: name, Symbol: name})
+			}
+			continue
+		}
+		if isVoucherTypeName(name) || isCurrencyName(name) {
+			continue
+		}
+		l := parseLedger(fields)
+		ledgerSeqs[page.Header.SeqNum] = len(m.Ledgers)
+		m.Ledgers = append(m.Ledgers, l)
+	}
 
-		if hasField(fields, FldLedgerName) {
-			name := getFieldStr(fields, FldLedgerName)
-
-			if hasField(fields, 0x1132) || hasField(fields, 0x0FD4) {
-				if name != "" && !seenUnits[name] {
-					seenUnits[name] = true
-					m.Units = append(m.Units, Unit{Name: name, Symbol: name})
-				}
+	// Second pass: enrich ledgers from pidx=0 pages (contact/tax details)
+	for _, page := range pages {
+		if page.Header.ObjType != 0x000B {
+			continue
+		}
+		idx, ok := ledgerSeqs[page.Header.SeqNum]
+		if !ok {
+			continue
+		}
+		l := &m.Ledgers[idx]
+		for _, f := range page.Fields {
+			if f.Type != 'S' {
 				continue
 			}
-
-			if isVoucherTypeName(name) || isCurrencyName(name) {
-				continue
+			switch f.ID {
+			case 0x0A91:
+				if l.Phone == "" { l.Phone = f.Str }
+			case 0x0A93:
+				if l.Contact == "" { l.Contact = f.Str }
+			case 0x0A94:
+				if l.Pincode == "" { l.Pincode = f.Str }
+			case 0x0AC1:
+				if l.PAN == "" { l.PAN = f.Str }
+			case 0x0ACA:
+				if l.GSTIN == "" && len(f.Str) == 15 { l.GSTIN = f.Str }
+			case 0x0ACC:
+				if l.State == "" { l.State = f.Str }
+			case 0x0ACE:
+				if l.DealerType == "" { l.DealerType = f.Str }
+			case 0x0AC4:
+				if l.BankAcc == "" { l.BankAcc = f.Str }
+			case 0x0A31:
+				if l.Country == "" { l.Country = f.Str }
+			case 0x0A90:
+				if l.Email == "" { l.Email = f.Str }
 			}
+		}
+	}
 
-			m.Ledgers = append(m.Ledgers, parseLedger(fields))
-		} else if page.Header.ObjType == 0x000B && page.Header.PageIdx == 2 && hasField(fields, FldName) {
-			g := parseGroup(fields)
+	// Third pass: groups from pidx=2 pages without ledger name
+	for _, page := range pages {
+		if page.Header.ObjType == 0x000B && page.Header.PageIdx == 2 && !hasField(page.Fields, FldLedgerName) && hasField(page.Fields, FldName) {
+			g := parseGroup(page.Fields)
 			if g.Name != "" && !seenGroups[g.Name] {
 				seenGroups[g.Name] = true
 				m.Groups = append(m.Groups, g)
@@ -191,41 +239,34 @@ func parseLedger(fields []Field) Ledger {
 			continue
 		}
 		switch f.ID {
-		case FldLedgerName:
-			if l.Name == "" {
-				l.Name = f.Str
-			}
-		case FldLedgerAddr:
-			l.Address = append(l.Address, f.Str)
-		case FldEmail:
-			l.Email = f.Str
-		case FldPhone:
-			l.Phone = f.Str
-		case FldContact:
-			l.Contact = f.Str
-		case FldPAN:
-			l.PAN = f.Str
-		case FldGSTIN:
-			l.GSTIN = f.Str
-		case FldGSTState:
-			l.State = f.Str
-		case FldPin:
-			if l.Pincode == "" {
-				l.Pincode = f.Str
-			}
-		case FldGUID:
-			l.GUID = f.Str
-		case FldName:
-			// In ledger pages, FldName sometimes holds parent group
-			if l.Parent == "" && !strings.EqualFold(f.Str, l.Name) {
+		case FldLedgerName: // 0x01F7
+			if l.Name == "" { l.Name = f.Str }
+		case 0x0002: // parent group name
+			if l.Parent == "" && l.Name != "" && !strings.EqualFold(f.Str, l.Name) {
 				l.Parent = f.Str
 			}
-		}
-	}
-	// Pincode might also be in address field 0x0A8F
-	for _, f := range fields {
-		if f.ID == 0x0A8F && f.Type == 'S' && l.Pincode == "" {
-			l.Pincode = f.Str
+		case FldLedgerAddr: // 0x01F8
+			l.Address = append(l.Address, f.Str)
+		case 0x0A91: // Phone
+			if l.Phone == "" { l.Phone = f.Str }
+		case 0x0A93: // Contact person
+			if l.Contact == "" { l.Contact = f.Str }
+		case 0x0A94: // Pincode
+			if l.Pincode == "" { l.Pincode = f.Str }
+		case 0x0AC1: // PAN
+			if l.PAN == "" { l.PAN = f.Str }
+		case 0x0ACA: // GSTIN
+			if l.GSTIN == "" && len(f.Str) == 15 { l.GSTIN = f.Str }
+		case 0x0ACC: // State
+			if l.State == "" { l.State = f.Str }
+		case 0x0ACE: // Dealer type
+			if l.DealerType == "" { l.DealerType = f.Str }
+		case 0x0AC4: // Bank account
+			if l.BankAcc == "" { l.BankAcc = f.Str }
+		case 0x0A31: // Country
+			if l.Country == "" { l.Country = f.Str }
+		case FldEmail: // 0x0A90
+			if l.Email == "" { l.Email = f.Str }
 		}
 	}
 	return l

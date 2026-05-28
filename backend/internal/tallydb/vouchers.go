@@ -55,7 +55,7 @@ func ParseVouchers(dataDir string) ([]Voucher, error) {
 		} else if isVoucherItemPage(page.Fields) && current != nil {
 			items := parseVoucherItems(page.Fields)
 			current.Items = append(current.Items, items...)
-		} else if isVoucherDetailPage(page.Fields) && current != nil {
+		} else if current != nil {
 			enrichVoucher(current, page.Fields)
 		}
 	}
@@ -108,8 +108,27 @@ func parseVoucherHeader(fields []Field) *Voucher {
 			if v.Number == "" { v.Number = f.Str }
 		case f.Type == 'S' && f.ID == 0x03ED:
 			if v.Party == "" { v.Party = f.Str }
-		case f.Type == 'S' && f.ID == FldVchGUID:
-			// skip
+		case f.Type == 'D' && f.ID == 0x0002:
+			if v.Date == "" {
+				days := int(f.Int32) - 2
+				year := 1900
+				for {
+					diy := 365
+					if (year%4 == 0 && year%100 != 0) || year%400 == 0 { diy = 366 }
+					if days < diy { break }
+					days -= diy
+					year++
+				}
+				month := 1
+				for _, md := range []int{31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31} {
+					m := md
+					if month == 2 && ((year%4 == 0 && year%100 != 0) || year%400 == 0) { m = 29 }
+					if days < m { break }
+					days -= m
+					month++
+				}
+				v.Date = fmt.Sprintf("%02d-%02d-%04d", days+1, month, year)
+			}
 		}
 	}
 	return v
@@ -121,7 +140,7 @@ func enrichVoucher(v *Voucher, fields []Field) {
 			switch f.ID {
 			case 0x000D: // party name
 				if v.Party == "" { v.Party = f.Str }
-			case 0x0006: // date
+			case 0x0006: // date as string
 				if v.Date == "" && len(f.Str) >= 8 { v.Date = f.Str }
 			case 0x0004: // invoice number
 				if v.Number == "" { v.Number = f.Str }
@@ -134,6 +153,29 @@ func enrichVoucher(v *Voucher, fields []Field) {
 			case 0x03F4: // narration/reference
 				if v.Narration == "" { v.Narration = f.Str }
 			}
+		}
+		// Date field (type 0x0D): days since 1900-01-01
+		if f.Type == 'D' && f.ID == 0x0002 && v.Date == "" {
+			days := int(f.Int32)
+			// Convert: 1900-01-01 + days - 2 (Excel epoch)
+			year := 1900
+			days -= 2
+			for {
+				diy := 365
+				if (year%4 == 0 && year%100 != 0) || year%400 == 0 { diy = 366 }
+				if days < diy { break }
+				days -= diy
+				year++
+			}
+			month := 1
+			for _, mdays := range []int{31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31} {
+				md := mdays
+				if month == 2 && ((year%4 == 0 && year%100 != 0) || year%400 == 0) { md = 29 }
+				if days < md { break }
+				days -= md
+				month++
+			}
+			v.Date = fmt.Sprintf("%02d-%02d-%04d", days+1, month, year)
 		}
 		// Extract total amount from 8-byte field on detail pages
 		if f.Type == 'L' && (f.ID == 0x0002 || f.ID == 0x0008) && v.Amount == 0 {
