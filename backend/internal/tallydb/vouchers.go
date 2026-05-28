@@ -59,21 +59,31 @@ func ParseVouchers(dataDir string) ([]Voucher, error) {
 			if current != nil && (current.Number != "" || current.Party != "") {
 				vouchers = append(vouchers, *current)
 			}
-			current = parseVoucherHeader(page.Fields)
-		} else if isVoucherItemPage(page.Fields) && current != nil {
-			items := parseVoucherItems(page.Fields)
-			current.Items = append(current.Items, items...)
+			current = &Voucher{}
+			for _, f := range page.Fields {
+				enrichVoucher(current, f, page.Header.PageIdx)
+			}
 		} else if current != nil {
-			enrichVoucher(current, page.Fields)
+			if isVoucherItemPage(page.Fields) {
+				current.Items = append(current.Items, parseVoucherItems(page.Fields)...)
+			}
+			for _, f := range page.Fields {
+				enrichVoucher(current, f, page.Header.PageIdx)
+			}
 		}
 	}
 	if current != nil && (current.Number != "" || current.Party != "") {
 		vouchers = append(vouchers, *current)
 	}
-	// Default type for vouchers with items = Sales (most common)
 	for i := range vouchers {
 		if vouchers[i].Type == "" && len(vouchers[i].Items) > 0 {
 			vouchers[i].Type = "Sales"
+		}
+		if vouchers[i].Type == "" && vouchers[i].Number != "" && len(vouchers[i].Number) > 3 && vouchers[i].Number[2] == '/' {
+			switch vouchers[i].Number[:2] {
+			case "SS": vouchers[i].Type = "Sales"
+			case "SP": vouchers[i].Type = "Purchase"
+			}
 		}
 	}
 	return vouchers, nil
@@ -172,138 +182,77 @@ func extractVoucherType(s string) string {
 	return ""
 }
 
-func enrichVoucher(v *Voucher, fields []Field) {
-	for _, f := range fields {
-		if f.Type == 'S' {
-			switch f.ID {
-			case 0x000D: // party name
-				if v.Party == "" { v.Party = f.Str }
-			case 0x0006: // date as string
-				if v.Date == "" && len(f.Str) >= 8 { v.Date = f.Str }
-			case 0x0004: // invoice number
-				if v.Number == "" { v.Number = f.Str }
-			case 0x000F, 0x01FB: // GSTIN
-				if v.GSTIN == "" && len(f.Str) == 15 { v.GSTIN = f.Str }
-			case 0x0005, 0x000E: // state
-				if v.State == "" && len(f.Str) > 3 { v.State = f.Str }
-			case 0x03ED: // party from .900
-				if v.Party == "" { v.Party = f.Str }
-			case 0x03F4: // narration/reference
-				if v.Narration == "" { v.Narration = f.Str }
-			case 0x0213: // seller GSTIN
-				if v.SellerGSTIN == "" && len(f.Str) == 15 { v.SellerGSTIN = f.Str }
-			case 0x0212: // place of supply
-				if v.PlaceOfSupply == "" && len(f.Str) > 2 { v.PlaceOfSupply = f.Str }
-			case 0x0025, 0x0017, 0x03EE, 0x00CF: // buyer address lines
-				if f.Str != "" && len(f.Str) > 2 {
-					dup := false
-					for _, a := range v.Address {
-						if a == f.Str { dup = true; break }
-					}
-					if !dup && len(v.Address) < 5 {
-						v.Address = append(v.Address, f.Str)
-					}
-				}
-			case 0x000A: // voucher unique ID
-				if v.VoucherID == "" { v.VoucherID = f.Str }
-			case 0x002D: // e-Invoice IRN
-				if v.EInvoiceIRN == "" && len(f.Str) > 10 { v.EInvoiceIRN = f.Str }
-			case 0x0016: // party display name (fallback)
-				if v.Party == "" { v.Party = f.Str }
-			case 0x00CE: // consignee/ship-to
-				if v.Party == "" { v.Party = f.Str }
-			case 0x040F: // supplier (purchase vouchers)
-				if v.Party == "" { v.Party = f.Str }
-			case 0x0411: // bill-to party
-				if v.Party == "" { v.Party = f.Str }
-			case 0x0019: // HSN at voucher level
-				// skip - we get HSN from items
-			case 0x0023: // buyer GSTIN
-				if v.GSTIN == "" && len(f.Str) == 15 { v.GSTIN = f.Str }
-			case 0x01FC: // GSTIN duplicate
-				if v.GSTIN == "" && len(f.Str) == 15 { v.GSTIN = f.Str }
+func enrichVoucher(v *Voucher, f Field, pidx uint32) {
+	switch {
+	case f.Type == 'S' && f.ID == 0x000D && v.Party == "":
+		v.Party = f.Str
+	case f.Type == 'S' && f.ID == 0x0016 && v.Party == "":
+		v.Party = f.Str
+	case f.Type == 'S' && f.ID == 0x00CE && v.Party == "":
+		v.Party = f.Str
+	case f.Type == 'S' && f.ID == 0x040F && v.Party == "":
+		v.Party = f.Str
+	case f.Type == 'S' && f.ID == 0x0411 && v.Party == "":
+		v.Party = f.Str
+	case f.Type == 'S' && f.ID == 0x03ED && v.Party == "":
+		v.Party = f.Str
+	case f.Type == 'S' && f.ID == 0x0006 && v.Number == "":
+		v.Number = f.Str
+	case f.Type == 'S' && f.ID == 0x00CC && v.Number == "":
+		v.Number = f.Str
+	case f.Type == 'S' && (f.ID == 0x0005 || f.ID == 0x000E) && v.State == "" && len(f.Str) > 3:
+		v.State = f.Str
+	case f.Type == 'S' && (f.ID == 0x000F || f.ID == 0x0023 || f.ID == 0x01FC) && v.GSTIN == "" && len(f.Str) == 15:
+		v.GSTIN = f.Str
+	case f.Type == 'S' && f.ID == 0x0212 && v.PlaceOfSupply == "":
+		v.PlaceOfSupply = f.Str
+	case f.Type == 'S' && f.ID == 0x0213 && v.SellerGSTIN == "" && len(f.Str) == 15:
+		v.SellerGSTIN = f.Str
+	case f.Type == 'S' && f.ID == 0x03F4 && v.Narration == "":
+		v.Narration = f.Str
+	case f.Type == 'S' && f.ID == 0x000A && v.VoucherID == "":
+		v.VoucherID = f.Str
+	case f.Type == 'S' && f.ID == 0x002D && v.EInvoiceIRN == "" && len(f.Str) > 10:
+		v.EInvoiceIRN = f.Str
+	case f.Type == 'S' && (f.ID == 0x0025 || f.ID == 0x0017 || f.ID == 0x03EE || f.ID == 0x00CF):
+		if f.Str != "" && len(f.Str) > 2 && len(v.Address) < 5 {
+			dup := false
+			for _, a := range v.Address {
+				if a == f.Str { dup = true; break }
 			}
+			if !dup { v.Address = append(v.Address, f.Str) }
 		}
-		// Extract voucher type from compound string field
-		if f.Type == 'S' && f.ID == 0x0002 && v.Type == "" && len(f.Str) > 15 {
-			if t := extractVoucherType(f.Str); t != "" {
-				v.Type = t
-			}
-		}
-		// Infer type from invoice number prefix
-		if f.Type == 'S' && v.Type == "" && v.Number != "" {
-			if len(v.Number) > 3 && v.Number[2] == '/' {
-				prefix := v.Number[:2]
-				switch prefix {
-				case "SS":
-					v.Type = "Sales"
-				case "SP":
-					v.Type = "Purchase"
-				case "SR":
-					v.Type = "Receipt"
-				case "SJ":
-					v.Type = "Journal"
-				case "CN":
-					v.Type = "Credit Note"
-				case "DN":
-					v.Type = "Debit Note"
-				}
-			}
-		}
-		// Date field (type 0x0D): days since 1900-01-01
-		if f.Type == 'D' && (f.ID == 0x0002 || f.ID == 0x00CB) && v.Date == "" {
-			days := int(f.Int32)
-			// Convert: 1900-01-01 + days - 2 (Excel epoch)
-			year := 1900
-			days -= 2
-			for {
-				diy := 365
-				if (year%4 == 0 && year%100 != 0) || year%400 == 0 { diy = 366 }
-				if days < diy { break }
-				days -= diy
-				year++
-			}
-			month := 1
-			for _, mdays := range []int{31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31} {
-				md := mdays
-				if month == 2 && ((year%4 == 0 && year%100 != 0) || year%400 == 0) { md = 29 }
-				if days < md { break }
-				days -= md
-				month++
-			}
-			v.Date = fmt.Sprintf("%02d-%02d-%04d", days+1, month, year)
-		}
-		// Extract total amount — field 0x00CA is the voucher ledger amount
-		if f.Type == 'L' && v.Amount == 0 {
-			if f.ID == 0x00CA || f.ID == 0x0008 {
-				amt := float64(f.Int64) / AmountDivisor
-				// Sanity: realistic invoice amounts (Rs.1 to Rs.1 crore)
-				if amt > 1 && amt < 10000000 {
-					v.Amount = amt
-				}
-			}
-		}
+	case f.Type == 'D' && (f.ID == 0x0002 || f.ID == 0x00CB) && v.Date == "":
+		days := int(f.Int32) - 2
+		year := 1900
+		for { diy := 365; if (year%4==0 && year%100!=0) || year%400==0 { diy=366 }; if days<diy { break }; days-=diy; year++ }
+		month := 1
+		for _, md := range []int{31,28,31,30,31,30,31,31,30,31,30,31} { m:=md; if month==2 && ((year%4==0 && year%100!=0) || year%400==0) { m=29 }; if days<m { break }; days-=m; month++ }
+		v.Date = fmt.Sprintf("%02d-%02d-%04d", days+1, month, year)
+	case f.Type == 'L' && f.ID == 0x0008 && v.Amount == 0 && (pidx == 1 || pidx == 3):
+		amt := float64(f.Int64) / 100000.0
+		if amt > 1 && amt < 10000000 { v.Amount = amt }
 	}
 }
 
 func parseVoucherItems(fields []Field) []VoucherItem {
 	var items []VoucherItem
 	var cur VoucherItem
-	amtIdx := 0 // track which 8-byte amount belongs to which item
+	amtIdx := 0
 
 	for _, f := range fields {
 		if f.Type == 'S' {
 			switch f.ID {
-			case 0x0001: // new item name
+			case 0x0001:
 				if cur.Name != "" {
 					items = append(items, cur)
 					cur = VoucherItem{}
 					amtIdx = 0
 				}
 				cur.Name = f.Str
-			case 0x0003: // HSN
+			case 0x0003:
 				cur.HSN = f.Str
-			case 0x0004: // Unit
+			case 0x0004:
 				cur.Unit = f.Str
 			}
 		}
