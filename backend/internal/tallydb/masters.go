@@ -50,12 +50,19 @@ type Masters struct {
 	Ledgers    []Ledger    `json:"ledgers"`
 	StockItems []StockItem `json:"stock_items"`
 	Units      []Unit      `json:"units"`
+	Godowns    []Godown    `json:"godowns"`
 }
 
 // Unit is a measurement unit (PCS, KG, LTR etc.)
 type Unit struct {
 	Name   string `json:"name"`
 	Symbol string `json:"symbol,omitempty"`
+}
+
+// Godown is a warehouse/location.
+type Godown struct {
+	Name   string `json:"name"`
+	Parent string `json:"parent,omitempty"`
 }
 
 // ParseMasters reads Manager.1800/.900 and extracts all master records.
@@ -184,6 +191,23 @@ func ParseMasters(dataDir string) (*Masters, error) {
 
 	m.StockItems = extractStockItems(dataDir)
 
+	// Fourth pass: godowns (pidx=1 pages with name containing "Location" or matching godown pattern)
+	for _, page := range pages {
+		ot := page.Header.ObjType
+		if (ot == 0x000B || ot == 0x0000) && page.Header.PageIdx == 1 {
+			name := getFieldStr(page.Fields, FldName)
+			// Godowns in Tally have names like "1-Main Location", "2-Branch Godown"
+			if name != "" && (strings.Contains(name, "Location") || strings.Contains(name, "Godown") || strings.Contains(name, "Warehouse")) {
+				// Strip numeric prefix like "1-"
+				display := name
+				if len(name) > 2 && name[1] == '-' {
+					display = name[2:]
+				}
+				m.Godowns = append(m.Godowns, Godown{Name: display})
+			}
+		}
+	}
+
 	return m, nil
 }
 
@@ -207,9 +231,9 @@ func isCurrencyName(name string) bool {
 	return false
 }
 
-// extractStockItems gets unique stock items from voucher line items.
+// extractStockItems gets stock items from Manager.1800 pidx=4 pages.
 func extractStockItems(dataDir string) []StockItem {
-	path := ResolveFile(dataDir, "TranMgr")
+	path := ResolveFile(dataDir, "Manager")
 	if path == "" {
 		return nil
 	}
@@ -218,24 +242,72 @@ func extractStockItems(dataDir string) []StockItem {
 		return nil
 	}
 
-	seen := make(map[string]bool)
 	var items []StockItem
+	seen := make(map[string]bool)
 	for _, page := range pages {
-		if !isVoucherItemPage(page.Fields) {
+		// Stock items are on pidx=4 type=0x000B pages with unit field 0x0FD4
+		if page.Header.ObjType != 0x000B && page.Header.ObjType != 0x0000 {
 			continue
 		}
+		if page.Header.PageIdx != 4 {
+			continue
+		}
+		if !hasField(page.Fields, 0x0FD4) {
+			continue
+		}
+
+		var item StockItem
+		for _, f := range page.Fields {
+			if f.Type != 'S' {
+				continue
+			}
+			switch f.ID {
+			case FldName:
+				if item.Name == "" {
+					item.Name = f.Str
+				} else if item.Parent == "" {
+					item.Parent = f.Str
+				}
+			case FldLedgerName:
+				if item.HSN == "" && len(f.Str) >= 4 && len(f.Str) <= 10 {
+					item.HSN = f.Str
+				}
+			case 0x0FD4:
+				if item.Unit == "" {
+					item.Unit = f.Str
+				}
+			}
+		}
+		if item.Name != "" && !seen[item.Name] {
+			seen[item.Name] = true
+			items = append(items, item)
+		}
+	}
+
+	// Fallback: also get items from TranMgr if Manager didn't have them
+	tranPath := ResolveFile(dataDir, "TranMgr")
+	if tranPath == "" {
+		return items
+	}
+	tranPages, err := ReadFile(tranPath)
+	if err != nil {
+		return items
+	}
+	for _, page := range tranPages {
 		for _, f := range page.Fields {
 			if f.Type == 'S' && f.ID == 0x0001 && f.Str != "" && !seen[f.Str] {
 				seen[f.Str] = true
 				item := StockItem{Name: f.Str}
-				// Get HSN from same page
 				for _, f2 := range page.Fields {
 					if f2.Type == 'S' && f2.ID == 0x0003 && len(f2.Str) >= 4 && len(f2.Str) <= 10 {
 						item.HSN = f2.Str
 						break
 					}
+				}
+				for _, f2 := range page.Fields {
 					if f2.Type == 'S' && f2.ID == 0x0004 && len(f2.Str) <= 10 {
-						item.Unit = f2.Str
+						item.BaseUnit = f2.Str
+						break
 					}
 				}
 				items = append(items, item)
