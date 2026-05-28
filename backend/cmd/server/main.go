@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rudra/tallyweb-backend/internal/auth"
 	"github.com/rudra/tallyweb-backend/internal/config"
 	"github.com/rudra/tallyweb-backend/internal/handler"
 	"github.com/rudra/tallyweb-backend/internal/middleware"
@@ -16,6 +19,8 @@ import (
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "config file path")
 	dataPath := flag.String("data", "", "path to Tally data folder (overrides config)")
+	dbURL := flag.String("db", "postgres://tallyweb:tallyweb@localhost:5432/tallyweb", "postgres connection URL")
+	jwtSecret := flag.String("jwt-secret", "", "JWT signing secret (random if empty)")
 	flag.Parse()
 
 	cfg, err := config.Load(*cfgPath)
@@ -23,7 +28,26 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	// Determine data path: CLI flag > config > auto-detect
+	// Postgres
+	pool, err := pgxpool.New(context.Background(), *dbURL)
+	if err != nil {
+		log.Fatalf("connect postgres: %v", err)
+	}
+	defer pool.Close()
+	if err := pool.Ping(context.Background()); err != nil {
+		log.Fatalf("ping postgres: %v", err)
+	}
+	log.Printf("Connected to PostgreSQL")
+
+	// Auth
+	auth.InitJWT(*jwtSecret)
+	authStore, err := auth.NewStore(pool)
+	if err != nil {
+		log.Fatalf("init auth: %v", err)
+	}
+	log.Printf("Auth ready (default: admin/admin)")
+
+	// Tally data
 	dp := *dataPath
 	if dp == "" {
 		dp = cfg.DataPath
@@ -49,7 +73,6 @@ func main() {
 		log.Printf("  [%s] %s", folder, name)
 	}
 
-	// Default company = first one found or from config
 	defaultFolder := db.Companies[0]
 	if cfg.DefaultCompany != "" {
 		for _, f := range db.Companies {
@@ -61,8 +84,9 @@ func main() {
 		}
 	}
 
+	// Handlers
 	base := handler.Base{DB: db, DefaultCompany: defaultFolder}
-
+	authH := &handler.AuthHandler{Store: authStore}
 	health := &handler.HealthHandler{Base: base}
 	companies := &handler.CompanyHandler{Base: base}
 	ledgers := &handler.LedgerHandler{Base: base}
@@ -75,25 +99,36 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// Public routes (no auth)
+	mux.HandleFunc("POST /api/auth/login", authH.Login)
 	mux.HandleFunc("GET /api/health", health.Get)
-	mux.HandleFunc("GET /api/companies", companies.List)
-	mux.HandleFunc("GET /api/company/{name}", companies.Details)
-	mux.HandleFunc("GET /api/dashboard/overview", dashboard.Overview)
-	mux.HandleFunc("GET /api/ledgers", ledgers.List)
-	mux.HandleFunc("POST /api/ledgers", ledgers.Create)
-	mux.HandleFunc("GET /api/ledgers/{name}/vouchers", vouchers.ByParty)
-	mux.HandleFunc("GET /api/groups", groups.List)
-	mux.HandleFunc("POST /api/groups", groups.Create)
-	mux.HandleFunc("GET /api/stock-items", stock.ListItems)
-	mux.HandleFunc("POST /api/stock-items", stock.CreateItem)
-	mux.HandleFunc("GET /api/units", units.List)
-	mux.HandleFunc("GET /api/vouchers", vouchers.List)
-	mux.HandleFunc("GET /api/reports/trial-balance", reports.TrialBalance)
-	mux.HandleFunc("GET /api/reports/profit-loss", reports.ProfitLoss)
-	mux.HandleFunc("GET /api/reports/gstr-1", reports.GSTR1)
+
+	// Protected routes (auth + RBAC)
+	protected := http.NewServeMux()
+	protected.HandleFunc("GET /api/companies", middleware.RBAC("dashboard", companies.List))
+	protected.HandleFunc("GET /api/company/{name}", middleware.RBAC("dashboard", companies.Details))
+	protected.HandleFunc("GET /api/dashboard/overview", middleware.RBAC("dashboard", dashboard.Overview))
+	protected.HandleFunc("GET /api/ledgers", middleware.RBAC("ledgers", ledgers.List))
+	protected.HandleFunc("POST /api/ledgers", middleware.RBAC("ledgers", ledgers.Create))
+	protected.HandleFunc("GET /api/ledgers/{name}/vouchers", middleware.RBAC("vouchers", vouchers.ByParty))
+	protected.HandleFunc("GET /api/groups", middleware.RBAC("groups", groups.List))
+	protected.HandleFunc("POST /api/groups", middleware.RBAC("groups", groups.Create))
+	protected.HandleFunc("GET /api/stock-items", middleware.RBAC("stock-items", stock.ListItems))
+	protected.HandleFunc("POST /api/stock-items", middleware.RBAC("stock-items", stock.CreateItem))
+	protected.HandleFunc("GET /api/units", middleware.RBAC("units", units.List))
+	protected.HandleFunc("GET /api/vouchers", middleware.RBAC("vouchers", vouchers.List))
+	protected.HandleFunc("GET /api/reports/trial-balance", middleware.RBAC("reports", reports.TrialBalance))
+	protected.HandleFunc("GET /api/reports/profit-loss", middleware.RBAC("reports", reports.ProfitLoss))
+	protected.HandleFunc("GET /api/reports/gstr-1", middleware.RBAC("reports", reports.GSTR1))
+	protected.HandleFunc("GET /api/auth/users", middleware.RBAC("users.list", authH.ListUsers))
+	protected.HandleFunc("POST /api/auth/users", authH.CreateUser)
+	protected.HandleFunc("DELETE /api/auth/users/{username}", authH.DeleteUser)
+
+	// Mount protected under auth middleware
+	mux.Handle("/api/", middleware.Auth(protected))
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	log.Printf("TallyWeb starting on %s (file-based mode)", addr)
+	log.Printf("TallyWeb starting on %s", addr)
 
 	srv := middleware.CORS(cfg.Server.CORSOrigins, mux)
 	if err := http.ListenAndServe(addr, srv); err != nil {
