@@ -92,7 +92,7 @@ func ParseMasters(dataDir string) (*Masters, error) {
 
 	// Second pass: enrich ledgers from pidx=0 pages (contact/tax details)
 	for _, page := range pages {
-		if page.Header.ObjType != 0x000B {
+		if page.Header.ObjType != 0x000B && page.Header.ObjType != 0x0000 {
 			continue
 		}
 		idx, ok := ledgerSeqs[page.Header.SeqNum]
@@ -131,7 +131,8 @@ func ParseMasters(dataDir string) (*Masters, error) {
 
 	// Third pass: groups from pidx=2 pages without ledger name
 	for _, page := range pages {
-		if page.Header.ObjType == 0x000B && page.Header.PageIdx == 2 && !hasField(page.Fields, FldLedgerName) && hasField(page.Fields, FldName) {
+		ot := page.Header.ObjType
+		if (ot == 0x000B || ot == 0x0000) && page.Header.PageIdx == 2 && !hasField(page.Fields, FldLedgerName) && hasField(page.Fields, FldName) {
 			g := parseGroup(page.Fields)
 			if g.Name != "" && !seenGroups[g.Name] {
 				seenGroups[g.Name] = true
