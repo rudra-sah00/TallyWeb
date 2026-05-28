@@ -98,6 +98,7 @@ func main() {
 	reports := &handler.ReportHandler{Base: base}
 	banking := &handler.BankingHandler{Base: base}
 	godowns := &handler.GodownHandler{Base: base}
+	employees := &handler.EmployeeHandler{Base: base}
 
 	mux := http.NewServeMux()
 
@@ -119,6 +120,7 @@ func main() {
 	protected.HandleFunc("POST /api/stock-items", middleware.RBAC("stock-items", stock.CreateItem))
 	protected.HandleFunc("GET /api/units", middleware.RBAC("units", units.List))
 	protected.HandleFunc("GET /api/godowns", middleware.RBAC("stock-items", godowns.List))
+	protected.HandleFunc("GET /api/employees", middleware.RBAC("reports", employees.List))
 	protected.HandleFunc("GET /api/vouchers", middleware.RBAC("vouchers", vouchers.List))
 	protected.HandleFunc("GET /api/reports/trial-balance", middleware.RBAC("reports", reports.TrialBalance))
 	protected.HandleFunc("GET /api/reports/profit-loss", middleware.RBAC("reports", reports.ProfitLoss))

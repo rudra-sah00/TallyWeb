@@ -30,7 +30,7 @@ type Ledger struct {
 	Country      string   `json:"country,omitempty"`
 	PriceList    string   `json:"price_list,omitempty"`
 	CreditPeriod string   `json:"credit_period,omitempty"`
-	OpeningBal   int64    `json:"opening_balance,omitempty"`
+	OpeningBal   float64  `json:"opening_balance,omitempty"`
 	CreatedDate  string   `json:"created_date,omitempty"`
 	LastVchDate  string   `json:"last_voucher_date,omitempty"`
 }
@@ -51,6 +51,7 @@ type Masters struct {
 	StockItems []StockItem `json:"stock_items"`
 	Units      []Unit      `json:"units"`
 	Godowns    []Godown    `json:"godowns"`
+	Employees  []Employee  `json:"employees"`
 }
 
 // Unit is a measurement unit (PCS, KG, LTR etc.)
@@ -63,6 +64,17 @@ type Unit struct {
 type Godown struct {
 	Name   string `json:"name"`
 	Parent string `json:"parent,omitempty"`
+}
+
+// Employee is a payroll employee.
+type Employee struct {
+	Name       string `json:"name"`
+	Gender     string `json:"gender,omitempty"`
+	FatherName string `json:"father_name,omitempty"`
+	PFNumber   string `json:"pf_number,omitempty"`
+	ESINumber  string `json:"esi_number,omitempty"`
+	BankName   string `json:"bank_name,omitempty"`
+	BankIFSC   string `json:"bank_ifsc,omitempty"`
 }
 
 // ParseMasters reads Manager.1800/.900 and extracts all master records.
@@ -158,11 +170,8 @@ func ParseMasters(dataDir string) (*Masters, error) {
 				if l.Pincode == "" { l.Pincode = f.Str }
 			}
 		}
-		// Numeric fields
+		// Numeric fields — dates only (balance needs computation from vouchers)
 		for _, f := range page.Fields {
-			if f.Type == 'I' && f.ID == 0x01F8 && l.OpeningBal == 0 {
-				l.OpeningBal = int64(f.Int32)
-			}
 			if f.Type == 'D' {
 				days := int(f.Int32) - 2
 				t := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, days)
@@ -196,14 +205,54 @@ func ParseMasters(dataDir string) (*Masters, error) {
 		ot := page.Header.ObjType
 		if (ot == 0x000B || ot == 0x0000) && page.Header.PageIdx == 1 {
 			name := getFieldStr(page.Fields, FldName)
-			// Godowns in Tally have names like "1-Main Location", "2-Branch Godown"
 			if name != "" && (strings.Contains(name, "Location") || strings.Contains(name, "Godown") || strings.Contains(name, "Warehouse")) {
-				// Strip numeric prefix like "1-"
 				display := name
 				if len(name) > 2 && name[1] == '-' {
 					display = name[2:]
 				}
 				m.Godowns = append(m.Godowns, Godown{Name: display})
+			}
+		}
+	}
+
+	// Fifth pass: employees (pidx=2 pages with gender field 0x0BEC or PF field 0x0BD6)
+	for _, page := range pages {
+		ot := page.Header.ObjType
+		if (ot == 0x000B || ot == 0x0000) && page.Header.PageIdx == 2 {
+			hasEmpField := false
+			for _, f := range page.Fields {
+				if f.Type == 'S' && (f.ID == 0x0BEC || f.ID == 0x0BD6 || f.ID == 0x0BF6) {
+					hasEmpField = true
+					break
+				}
+			}
+			if !hasEmpField {
+				continue
+			}
+			var emp Employee
+			for _, f := range page.Fields {
+				if f.Type != 'S' {
+					continue
+				}
+				switch f.ID {
+				case FldName:
+					if emp.Name == "" { emp.Name = f.Str }
+				case 0x0BEC:
+					emp.Gender = f.Str
+				case 0x0BF6:
+					emp.FatherName = f.Str
+				case 0x0BD6:
+					emp.PFNumber = f.Str
+				case 0x0BF7:
+					emp.ESINumber = f.Str
+				case 0x0BD8:
+					emp.BankName = f.Str
+				case 0x0BFD:
+					emp.BankIFSC = f.Str
+				}
+			}
+			if emp.Name != "" {
+				m.Employees = append(m.Employees, emp)
 			}
 		}
 	}
