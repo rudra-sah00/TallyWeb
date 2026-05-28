@@ -114,7 +114,7 @@ func parseVoucherHeader(fields []Field) *Voucher {
 	v := &Voucher{}
 	for _, f := range fields {
 		switch {
-		case f.Type == 'S' && f.ID == FldVchNarration:
+		case f.Type == 'S' && f.ID == FldNarration:
 			if v.Party == "" { v.Party = f.Str }
 		case f.Type == 'S' && f.ID == 0x00CC:
 			if v.Number == "" { v.Number = f.Str }
