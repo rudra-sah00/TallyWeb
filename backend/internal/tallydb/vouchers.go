@@ -4,8 +4,8 @@ import (
 	"fmt"
 )
 
-// AmountDivisor — Tally stores amounts as value × 100,000.
-const AmountDivisor = 100000.0
+// AmountDivisor — Tally stores amounts in paise (value × 100).
+const AmountDivisor = 100.0
 
 // Voucher is a transaction record.
 type Voucher struct {
@@ -273,10 +273,15 @@ func enrichVoucher(v *Voucher, fields []Field) {
 			}
 			v.Date = fmt.Sprintf("%02d-%02d-%04d", days+1, month, year)
 		}
-		// Extract total amount from 8-byte field on detail pages
-		if f.Type == 'L' && (f.ID == 0x0002 || f.ID == 0x0008) && v.Amount == 0 {
-			amt := float64(f.Int64) / AmountDivisor
-			if amt > 0 { v.Amount = amt }
+		// Extract total amount — field 0x00CA is the voucher ledger amount
+		if f.Type == 'L' && v.Amount == 0 {
+			if f.ID == 0x00CA || f.ID == 0x0008 {
+				amt := float64(f.Int64) / AmountDivisor
+				// Sanity: realistic invoice amounts (Rs.1 to Rs.1 crore)
+				if amt > 1 && amt < 10000000 {
+					v.Amount = amt
+				}
+			}
 		}
 	}
 }
