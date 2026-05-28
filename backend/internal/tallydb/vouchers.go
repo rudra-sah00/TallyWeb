@@ -208,6 +208,20 @@ func enrichVoucher(v *Voucher, fields []Field) {
 				if v.VoucherID == "" { v.VoucherID = f.Str }
 			case 0x002D: // e-Invoice IRN
 				if v.EInvoiceIRN == "" && len(f.Str) > 10 { v.EInvoiceIRN = f.Str }
+			case 0x0016: // party display name (fallback)
+				if v.Party == "" { v.Party = f.Str }
+			case 0x00CE: // consignee/ship-to
+				if v.Party == "" { v.Party = f.Str }
+			case 0x040F: // supplier (purchase vouchers)
+				if v.Party == "" { v.Party = f.Str }
+			case 0x0411: // bill-to party
+				if v.Party == "" { v.Party = f.Str }
+			case 0x0019: // HSN at voucher level
+				// skip - we get HSN from items
+			case 0x0023: // buyer GSTIN
+				if v.GSTIN == "" && len(f.Str) == 15 { v.GSTIN = f.Str }
+			case 0x01FC: // GSTIN duplicate
+				if v.GSTIN == "" && len(f.Str) == 15 { v.GSTIN = f.Str }
 			}
 		}
 		// Extract voucher type from compound string field
@@ -237,7 +251,7 @@ func enrichVoucher(v *Voucher, fields []Field) {
 			}
 		}
 		// Date field (type 0x0D): days since 1900-01-01
-		if f.Type == 'D' && f.ID == 0x0002 && v.Date == "" {
+		if f.Type == 'D' && (f.ID == 0x0002 || f.ID == 0x00CB) && v.Date == "" {
 			days := int(f.Int32)
 			// Convert: 1900-01-01 + days - 2 (Excel epoch)
 			year := 1900

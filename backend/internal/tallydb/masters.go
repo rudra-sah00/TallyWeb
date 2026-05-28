@@ -145,6 +145,10 @@ func ParseMasters(dataDir string) (*Masters, error) {
 				if l.PriceList == "" { l.PriceList = f.Str }
 			case 0x0BBB: // credit period
 				if l.CreditPeriod == "" { l.CreditPeriod = f.Str }
+			case 0x0A97: // country dial code
+				// skip (not useful for display)
+			case 0x0A8F: // alternate pincode
+				if l.Pincode == "" { l.Pincode = f.Str }
 			}
 		}
 		// Numeric fields
