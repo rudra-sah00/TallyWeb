@@ -66,6 +66,12 @@ func ParseVouchers(dataDir string) ([]Voucher, error) {
 	if current != nil && (current.Number != "" || current.Party != "") {
 		vouchers = append(vouchers, *current)
 	}
+	// Default type for vouchers with items = Sales (most common)
+	for i := range vouchers {
+		if vouchers[i].Type == "" && len(vouchers[i].Items) > 0 {
+			vouchers[i].Type = "Sales"
+		}
+	}
 	return vouchers, nil
 }
 
@@ -138,6 +144,30 @@ func parseVoucherHeader(fields []Field) *Voucher {
 	return v
 }
 
+// extractVoucherType parses compound string "2026{ref}Outward Invoice{number}"
+func extractVoucherType(s string) string {
+	types := []string{"Outward Invoice", "Inward Invoice", "Payment", "Receipt",
+		"Journal", "Contra", "Credit Note", "Debit Note", "Sales Order",
+		"Purchase Order", "Delivery Note", "Receipt Note"}
+	for _, t := range types {
+		if len(s) > len(t) {
+			for i := 0; i <= len(s)-len(t); i++ {
+				if s[i:i+len(t)] == t {
+					switch t {
+					case "Outward Invoice":
+						return "Sales"
+					case "Inward Invoice":
+						return "Purchase"
+					default:
+						return t
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func enrichVoucher(v *Voucher, fields []Field) {
 	for _, f := range fields {
 		if f.Type == 'S' {
@@ -172,6 +202,32 @@ func enrichVoucher(v *Voucher, fields []Field) {
 				}
 			case 0x000A: // voucher unique ID
 				if v.VoucherID == "" { v.VoucherID = f.Str }
+			}
+		}
+		// Extract voucher type from compound string field
+		if f.Type == 'S' && f.ID == 0x0002 && v.Type == "" && len(f.Str) > 15 {
+			if t := extractVoucherType(f.Str); t != "" {
+				v.Type = t
+			}
+		}
+		// Infer type from invoice number prefix
+		if f.Type == 'S' && v.Type == "" && v.Number != "" {
+			if len(v.Number) > 3 && v.Number[2] == '/' {
+				prefix := v.Number[:2]
+				switch prefix {
+				case "SS":
+					v.Type = "Sales"
+				case "SP":
+					v.Type = "Purchase"
+				case "SR":
+					v.Type = "Receipt"
+				case "SJ":
+					v.Type = "Journal"
+				case "CN":
+					v.Type = "Credit Note"
+				case "DN":
+					v.Type = "Debit Note"
+				}
 			}
 		}
 		// Date field (type 0x0D): days since 1900-01-01
