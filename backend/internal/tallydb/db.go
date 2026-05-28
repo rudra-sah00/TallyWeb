@@ -187,6 +187,11 @@ func (db *DB) GetVouchers(folderName string) ([]Voucher, error) {
 	return ParseVouchers(db.CompanyDir(folderName))
 }
 
+// GetBankEntries returns banking transactions from LinkMgr.
+func (db *DB) GetBankEntries(folderName string) ([]BankEntry, error) {
+	return ParseBankEntries(db.CompanyDir(folderName))
+}
+
 // GetUnits returns all measurement units.
 func (db *DB) GetUnits(folderName string) ([]Unit, error) {
 	m, err := db.GetMasters(folderName)

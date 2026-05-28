@@ -96,6 +96,7 @@ func main() {
 	dashboard := &handler.DashboardHandler{Base: base}
 	units := &handler.UnitHandler{Base: base}
 	reports := &handler.ReportHandler{Base: base}
+	banking := &handler.BankingHandler{Base: base}
 
 	mux := http.NewServeMux()
 
@@ -120,6 +121,7 @@ func main() {
 	protected.HandleFunc("GET /api/reports/trial-balance", middleware.RBAC("reports", reports.TrialBalance))
 	protected.HandleFunc("GET /api/reports/profit-loss", middleware.RBAC("reports", reports.ProfitLoss))
 	protected.HandleFunc("GET /api/reports/gstr-1", middleware.RBAC("reports", reports.GSTR1))
+	protected.HandleFunc("GET /api/banking/transactions", middleware.RBAC("reports", banking.List))
 	protected.HandleFunc("GET /api/auth/users", middleware.RBAC("users.list", authH.ListUsers))
 	protected.HandleFunc("POST /api/auth/users", authH.CreateUser)
 	protected.HandleFunc("DELETE /api/auth/users/{username}", authH.DeleteUser)

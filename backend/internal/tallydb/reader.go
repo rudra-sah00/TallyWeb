@@ -143,6 +143,19 @@ func decodeFields(page []byte) []Field {
 				i += 8
 				continue
 			}
+			// Type 0x07: amount(4) + date(2) compound field (in LinkMgr)
+			if fid > 0 && fid < 0x5000 && page[i+2] == 0x00 && page[i+3] == 0x07 && i+10 <= len(page) {
+				amt := int32(binary.LittleEndian.Uint32(page[i+4 : i+8]))
+				dateVal := int32(binary.LittleEndian.Uint16(page[i+8 : i+10]))
+				if dateVal > 40000 && dateVal < 55000 {
+					fields = append(fields, Field{ID: fid, Type: 'D', Int32: dateVal})
+				}
+				if amt != 0 {
+					fields = append(fields, Field{ID: fid, Type: 'L', Int64: int64(amt) * 100000})
+				}
+				i += 10
+				continue
+			}
 		}
 
 		i++
