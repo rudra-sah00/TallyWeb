@@ -1,161 +1,233 @@
-# Tally Prime 6.0 Web Extension – Financial Dashboard Application
+<p align="center">
+  <h1 align="center">TallyWeb</h1>
+  <p align="center">Modern web dashboard for TallyPrime ERP</p>
+</p>
 
-This project is an **extended web version of Tally Prime 6.0**, bringing powerful business management tools to your browser. It enables seamless access to Tally data and features from anywhere, leveraging Tally’s XML API for real-time financial insights, analytics, and business operations management.
+<p align="center">
+  <a href="https://github.com/rudra-sah00/TallyWeb/stargazers">
+    <img src="https://img.shields.io/github/stars/rudra-sah00/TallyWeb?style=for-the-badge&logo=github&color=6366f1&logoColor=white" alt="Stars">
+  </a>
+  <a href="https://github.com/rudra-sah00/TallyWeb/network/members">
+    <img src="https://img.shields.io/github/forks/rudra-sah00/TallyWeb?style=for-the-badge&logo=github&color=8b5cf6&logoColor=white" alt="Forks">
+  </a>
+  <a href="https://github.com/rudra-sah00/TallyWeb/issues">
+    <img src="https://img.shields.io/github/issues/rudra-sah00/TallyWeb?style=for-the-badge&logo=github&color=22c55e&logoColor=white" alt="Issues">
+  </a>
+  <a href="https://github.com/rudra-sah00/TallyWeb/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/rudra-sah00/TallyWeb?style=for-the-badge&color=eab308&logoColor=white" alt="License">
+  </a>
+</p>
 
-Built with React.js and TypeScript, this dashboard integrates with your existing Tally server, providing modules for sales, purchases, inventory, ledgers, and more—all accessible via a modern web interface.
+<p align="center">
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#architecture">Architecture</a> •
+  <a href="#features">Features</a> •
+  <a href="#api-reference">API</a> •
+  <a href="#contributing">Contributing</a>
+</p>
 
-## Project Structure
+---
+
+## Architecture
+
+TallyWeb is a **monorepo** — all services live in one repository for easy development, consistent tooling, and atomic changes across the stack.
 
 ```
-src/
-├── modules/                    # Feature-based modules
-│   ├── dashboard/             # Main dashboard module
-│   ├── sales/                 # Sales management module
-│   ├── purchases/             # Purchase management module
-│   └── inventory/             # Inventory management module
-├── shared/                    # Shared components and utilities
-│   ├── components/            # Reusable UI components
-│   ├── hooks/                 # Custom React hooks
-│   └── utils/                 # Utility functions
-├── context/                   # React context providers
-└── docs/                      # Documentation
+TallyWeb/
+├── backend/            Go REST API (port 8080)
+│   ├── cmd/server/     Application entry point
+│   ├── internal/       Private application code
+│   │   ├── config/     YAML configuration loader
+│   │   ├── handler/    HTTP route handlers
+│   │   ├── middleware/ CORS, logging
+│   │   ├── model/      Data structures & XML parsing
+│   │   └── tally/      Tally XML API client
+│   └── config.yaml     Runtime configuration
+├── frontend/           Next.js 15 web dashboard (port 3000)
+│   └── src/
+│       ├── app/        Pages (App Router)
+│       ├── components/ Reusable UI components
+│       ├── lib/        API client & utilities
+│       ├── store/      Zustand state management
+│       └── hooks/      Custom React hooks
+├── docs/               Documentation (planned)
+├── Makefile            Orchestrates all services
+├── CONTRIBUTING.md     Contribution guidelines
+└── LICENSE             MIT License
 ```
+
+## Quick Start
+
+```bash
+# Clone
+git clone https://github.com/rudra-sah00/TallyWeb.git
+cd TallyWeb
+
+# Install frontend dependencies
+make install
+
+# Run both backend + frontend in parallel
+make dev
+```
+
+| Service  | URL                    | Description                         |
+|----------|------------------------|-------------------------------------|
+| Backend  | http://localhost:8080   | Go REST API → Tally XML API proxy   |
+| Frontend | http://localhost:3000   | Next.js dashboard                   |
 
 ## Features
 
-### Dashboard Module
-- **Overview Cards**: Key financial metrics with trend indicators
-- **Cash & Bank Overview**: Real-time balance tracking
-- **Quick Stats**: Important alerts and notifications
-- **Recent Activity**: Latest transactions across all modules
+### Backend (Go)
 
-### Sales Module
-- **Sales Overview**: Revenue metrics and top customers
-- **Sales Analytics**: Interactive charts and performance metrics
-- **Customer Management**: Complete customer database with contact information
-- **Sales Transactions**: Detailed transaction history with filtering
+- **Zero external dependencies** — only `gopkg.in/yaml.v3`
+- Go 1.23+ with `net/http` ServeMux (Go 1.22+ pattern matching)
+- CORS middleware with configurable origins
+- XML sanitization for Tally's control character quirks
+- Configurable via `backend/config.yaml`
 
-### Purchases Module
-- **Purchase Overview**: Procurement metrics and top suppliers
-- **Purchase Analytics**: Spending analysis and supplier performance
-- **Supplier Management**: Supplier database with ratings and contact details
-- **Purchase Transactions**: Complete purchase order history
+### Frontend (Next.js 15)
 
-### Inventory Module
-- **Inventory Overview**: Stock value and category breakdown
-- **Stock Levels**: Visual representation of current stock levels
-- **Low Stock Alerts**: Critical and low stock notifications with reorder suggestions
-- **Inventory Movements**: Complete stock movement history
+- App Router + Turbopack for fast HMR
+- Tailwind CSS v4 with **glass morphism** design system
+- Zustand for lightweight state management
+- Sonner toast notifications
+- Lucide React icons
+- Dark theme with indigo accent, glow effects, mesh gradients
 
-## Getting Started
+### Pages
 
-### Prerequisites
-- Node.js (v16 or higher)
-- npm or yarn
-- Access to a running Tally Prime 6.0 server (with Tally XML API enabled)
+| Page | Description |
+|------|-------------|
+| **Dashboard** | Connection status, company stats with glow cards |
+| **Masters** | Ledgers, Groups, Stock Items, Units, Godowns, Employees |
+| **Vouchers** | Filter by type, create Sales/Purchase/Payment/Receipt/Journal |
+| **Reports** | 13 financial reports + ledger statement search |
+| **GST** | GSTR-1/2A/3B/9, E-Invoice info, E-Way Bill info |
+| **Raw Query** | Direct XML passthrough with preset templates |
+| **Settings** | Company switcher, connection test |
 
-### Installation
-```bash
-npm install
+## API Reference
+
+### Core
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Tally connection status |
+| GET | `/api/companies` | List all companies |
+
+### Masters (CRUD)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET/POST | `/api/ledgers` | List & create ledgers |
+| PUT/DELETE | `/api/ledgers/{name}` | Update & delete |
+| GET/POST | `/api/groups` | Account groups |
+| GET/POST | `/api/stock-items` | Stock items |
+| GET/POST | `/api/units` | Measurement units |
+| GET/POST | `/api/godowns` | Godown/warehouses |
+| GET/POST | `/api/employees` | Employee master |
+
+### Vouchers
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/vouchers` | List (filter: `?type=Sales&from=&to=`) |
+| GET | `/api/vouchers/{id}` | Single voucher detail |
+| POST | `/api/vouchers` | Create voucher |
+| PUT/DELETE | `/api/vouchers/{id}` | Update & delete |
+
+### Reports
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/reports/{report}` | 18 report types |
+| GET | `/api/reports/ledger/{name}` | Ledger statement |
+| GET | `/api/reports/group/{name}` | Group statement |
+
+Available reports: `balance-sheet`, `profit-loss`, `trial-balance`, `day-book`, `cash-flow`, `funds-flow`, `ratio-analysis`, `bills-receivable`, `bills-payable`, `ageing-analysis`, `stock-summary`, `godown-summary`, `movement-analysis`, `gstr-1`, `gstr-2`, `gstr-3b`
+
+### GST & Compliance
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/gst/gstr{1,2,3b,9}` | GST returns |
+| POST | `/api/einvoice/generate` | Generate e-invoice |
+| POST | `/api/einvoice/cancel` | Cancel e-invoice |
+| POST | `/api/eway-bill/generate` | Generate e-way bill |
+| POST | `/api/eway-bill/cancel` | Cancel e-way bill |
+
+### Banking & Raw
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/banking/reconciliation/{name}` | Bank reconciliation |
+| GET | `/api/banking/book/{name}` | Bank book |
+| GET | `/api/banking/outstanding/{name}` | Outstanding |
+| POST | `/api/raw` | Pass-through XML to Tally |
+
+## Configuration
+
+```yaml
+# backend/config.yaml
+tally:
+  host: "100.84.248.54"     # Tally machine IP (Tailscale)
+  port: 9000                # Tally XML API port
+  timeout: 30s
+
+server:
+  port: 8080
+  cors_origins:
+    - "http://localhost:3000"
+    - "*"
+
+default_company: "M/S. PRAJNA AGENCIES (2025-26)"
 ```
 
-### Tally Server Configuration (IMPORTANT)
-To connect the dashboard to your Tally server, you **must configure the Tally server URL in `vite.config.ts`** before running the app. This enables the reverse proxy for API requests.
+## Build & Deploy
 
-#### How to Set the Tally Server URL
-1. Open `vite.config.ts` in the project root.
-2. Locate the `server.proxy` section:
-   ```js
-   server: {
-     proxy: {
-       '/api/tally': {
-         target: 'http://<YOUR_TALLY_SERVER_IP>:<PORT>',
-         changeOrigin: true,
-         rewrite: (path) => path.replace(/^\/api\/tally/, ''),
-         timeout: 120000,
-         proxyTimeout: 120000,
-       }
-     }
-   }
-   ```
-3. Replace `http://192.168.31.119:9000` with your actual Tally server’s IP and port.
-   - Example: `target: 'http://192.168.1.100:9000'`
-4. Save the file.
-
-> **Note:** The app will not work unless the Tally server URL is correctly set and the Tally server is running with XML API enabled.
-
-### Development
 ```bash
-npm run dev
+make build    # Build both: Go binary + Next.js static
+make clean    # Remove all build artifacts
 ```
 
-### Build
-```bash
-npm run build
-```
+## Tech Stack
 
-## Architecture & Integration
-
-### Modular Design
-Each module is self-contained with its own components, logic, and routing. This makes the application:
-- **Scalable**: Easy to add new modules
-- **Maintainable**: Clear separation of concerns
-- **Testable**: Isolated functionality
-
-### Component Structure
-- **Page Components**: Main module entry points
-- **Feature Components**: Specific functionality within modules
-- **Shared Components**: Reusable UI elements
-
-### State Management
-- **Context API**: Global state management
-- **Local State**: Component-specific state
-- **Custom Hooks**: Reusable state logic
-
-### Tally Integration
-- **Reverse Proxy**: All requests to `/api/tally` are proxied to your Tally server using the configuration in `vite.config.ts`.
-- **XML API**: The app communicates with Tally using its XML API for fetching and managing business data.
-- **Security**: Ensure your Tally server is accessible only to trusted clients and the API is properly secured.
-
-## Customization & Extensibility
-
-### Adding New Modules
-1. Create a new folder in `src/modules/`
-2. Add module components and routing
-3. Update the main App.tsx navigation
-4. Add documentation in `docs/modules/`
-
-### Styling
-- **Tailwind CSS**: Utility-first CSS framework
-- **Responsive Design**: Mobile-first approach
-- **Color System**: Consistent color palette
-- **Component Variants**: Reusable style patterns
-
-### Data Integration
-- **Live Tally Data**: Connects directly to your Tally server for real business data
-- **API Ready**: Easily extend to other APIs or data sources
-- **Tally XML API**: Designed for robust Tally integration
-
-## Documentation
-
-- [Dashboard Module](./modules/dashboard.md)
-- [Sales Module](./modules/sales.md)
-- [Purchases Module](./modules/purchases.md)
-- [Inventory Module](./modules/inventory.md)
-- [Shared Components](./shared/components.md)
-- [API Integration](./api-integration.md)
-- [Customization Guide](./customization.md)
-- [Tally Integration](https://help.tallysolutions.com/tally-prime/xml-interface/)
+| Layer | Technology |
+|-------|-----------|
+| Backend | Go 1.23, net/http, gopkg.in/yaml.v3 |
+| Frontend | Next.js 15, React 19, TypeScript 5 |
+| Styling | Tailwind CSS v4, Glass morphism |
+| State | Zustand 5 |
+| Icons | Lucide React |
+| Toasts | Sonner |
+| Target | TallyPrime XML API (port 9000) |
 
 ## Contributing
 
-1. Follow the modular architecture
-2. Use TypeScript for type safety
-3. Write comprehensive documentation
-4. Test components thoroughly
-5. Follow naming conventions
-6. Ensure Tally server configuration is documented for new contributors
+We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feat/amazing-feature`)
+3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to the branch (`git push origin feat/amazing-feature`)
+5. Open a Pull Request
+
+## Star History
+
+<a href="https://star-history.com/#rudra-sah00/TallyWeb&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=rudra-sah00/TallyWeb&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=rudra-sah00/TallyWeb&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=rudra-sah00/TallyWeb&type=Date" />
+  </picture>
+</a>
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License — see the [LICENSE](./LICENSE) file.
+
+---
+
+<p align="center">
+  Made with ❤️ for the Indian accounting community
+</p>

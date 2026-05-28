@@ -1,0 +1,15 @@
+# TallyWeb Backend Configuration
+# File-based mode: reads .1800 files directly — no Tally server needed
+
+# Path to Tally data folder (contains company subfolders like 102025, 020013 etc.)
+# On Windows: C:\Users\Public\TallyPrime\data
+# Or use -data flag to override
+data_path: ""
+
+server:
+  port: 8080
+  cors_origins:
+    - "http://localhost:3000"
+    - "*"
+
+default_company: ""
