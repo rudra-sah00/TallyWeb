@@ -91,6 +91,21 @@ func ParseVouchers(dataDir string) ([]Voucher, error) {
 				enrichVoucher(&v, f, p.Header.PageIdx)
 			}
 		}
+		// Extract GST tax from pidx=1 pages (fid=0x0003=CGST, fid=0x0004=SGST)
+		if v.Amount > 0 {
+			for _, p := range group {
+				if p.Header.ObjType == 0x0005 && p.Header.PageIdx == 1 {
+					for _, f := range p.Fields {
+						if f.Type == 'L' && (f.ID == 0x0003 || f.ID == 0x0004) {
+							tax := float64(f.Int64) / 100000.0
+							if tax > 0 && tax < v.Amount*0.15 {
+								v.TaxAmount += tax
+							}
+						}
+					}
+				}
+			}
+		}
 		if v.Number != "" || v.Party != "" {
 			vouchers = append(vouchers, v)
 		}

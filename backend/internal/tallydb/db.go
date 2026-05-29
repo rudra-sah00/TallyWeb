@@ -407,11 +407,23 @@ func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
 
 		switch v.Type {
 		case "Sales":
-			addEntry(partyGroup, v.Amount, 0)     // Dr party (debtor)
-			addEntry("Sales Accounts", 0, v.Amount) // Cr sales
+			addEntry(partyGroup, v.Amount, 0) // Dr party (debtor)
+			taxable := v.Amount - v.TaxAmount
+			if v.TaxAmount > 0 && taxable > 0 {
+				addEntry("Sales Accounts", 0, taxable)             // Cr sales (net)
+				addEntry("Current Liabilities", 0, v.TaxAmount)   // Cr output GST
+			} else {
+				addEntry("Sales Accounts", 0, v.Amount) // Cr sales (full)
+			}
 		case "Purchase":
-			addEntry("Purchase Accounts", v.Amount, 0) // Dr purchases
-			addEntry(partyGroup, 0, v.Amount)           // Cr party (creditor)
+			taxable := v.Amount - v.TaxAmount
+			if v.TaxAmount > 0 && taxable > 0 {
+				addEntry("Purchase Accounts", taxable, 0)          // Dr purchases (net)
+				addEntry("Current Assets", v.TaxAmount, 0)        // Dr input GST credit
+			} else {
+				addEntry("Purchase Accounts", v.Amount, 0) // Dr purchases (full)
+			}
+			addEntry(partyGroup, 0, v.Amount) // Cr party (creditor)
 		case "Receipt":
 			addEntry("Current Assets", v.Amount, 0) // Dr cash/bank
 			addEntry(partyGroup, 0, v.Amount)        // Cr party
