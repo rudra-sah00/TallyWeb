@@ -225,12 +225,20 @@ func (db *DB) GetVouchers(folderName string) ([]Voucher, error) {
 		case "Cash-in-Hand", "Cash-in-hand", "Bank Accounts", "Bank OD A/c":
 			vouchers[i].Type = "Payment"
 		default:
-			if len(vouchers[i].Items) > 0 {
+			if len(vouchers[i].Items) > 0 || vouchers[i].Amount > 0 {
 				vouchers[i].Type = "Sales"
 			}
 		}
 	}
-	return vouchers, nil
+	// Filter out system entries (Opening Entry etc.) with no useful data
+	filtered := vouchers[:0]
+	for _, v := range vouchers {
+		if v.Number == "OE" && v.Party == "" && v.Amount == 0 {
+			continue
+		}
+		filtered = append(filtered, v)
+	}
+	return filtered, nil
 }
 
 func min(a, b int) int {
