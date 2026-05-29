@@ -135,11 +135,82 @@ func ParseMasters(dataDir string) (*Masters, error) {
 		if parentName := groupBySeq[page.Header.ParentSeq]; parentName != "" {
 			l.Parent = parentName
 		}
+		// Extract opening balance from fid=0x0A2B type 'L' (type marker 0x09)
+		for _, f := range fields {
+			if f.ID == 0x0A2B && f.Type == 'L' && f.Int64 != 0 {
+				l.OpeningBal = float64(f.Int64) / 100000.0
+				break
+			}
+		}
 		ledgerSeqs[page.Header.SeqNum] = len(m.Ledgers)
 		m.Ledgers = append(m.Ledgers, l)
 	}
 
-	// Second pass: enrich ledgers from pidx=0 pages (contact/tax details)
+	// Second pass: enrich opening balances from other pidx pages of same seq
+	// Also collect OBs from seqs NOT in ledgerSeqs (system ledgers like Cash, P&L)
+	obBySeq := make(map[uint32]float64)
+	for _, page := range pages {
+		if page.Header.ObjType != 0x000B {
+			continue
+		}
+		for _, f := range page.Fields {
+			if f.ID == 0x0A2B && f.Type == 'L' && f.Int64 != 0 {
+				seq := page.Header.SeqNum
+				if _, exists := obBySeq[seq]; !exists {
+					obBySeq[seq] = float64(f.Int64) / 100000.0
+				}
+				break
+			}
+		}
+	}
+	// Apply OBs to known ledgers
+	for seq, ob := range obBySeq {
+		if idx, ok := ledgerSeqs[seq]; ok {
+			if m.Ledgers[idx].OpeningBal == 0 {
+				m.Ledgers[idx].OpeningBal = ob
+			}
+		}
+	}
+	// For OBs on unknown seqs, find their name from fid=0x0002 or 0x01F7 on same seq
+	nameBySeq := make(map[uint32]string)
+	for _, page := range pages {
+		seq := page.Header.SeqNum
+		if _, need := obBySeq[seq]; !need {
+			continue
+		}
+		if _, already := ledgerSeqs[seq]; already {
+			continue
+		}
+		if nameBySeq[seq] != "" {
+			continue
+		}
+		for _, f := range page.Fields {
+			if f.Type == 'S' && (f.ID == 0x01F7 || f.ID == FldName) && f.Str != "" && len(f.Str) > 2 {
+				nameBySeq[seq] = f.Str
+				break
+			}
+		}
+	}
+	// Add system ledgers with their OBs
+	for seq, name := range nameBySeq {
+		ob := obBySeq[seq]
+		if isVoucherTypeName(name) || isCurrencyName(name) {
+			continue
+		}
+		l := Ledger{Name: name, OpeningBal: ob}
+		// Try to find parent from pages of this seq
+		for _, pg := range pages {
+			if pg.Header.SeqNum == seq && pg.Header.ObjType == 0x000B {
+				if pn := groupBySeq[pg.Header.ParentSeq]; pn != "" {
+					l.Parent = pn
+					break
+				}
+			}
+		}
+		m.Ledgers = append(m.Ledgers, l)
+	}
+
+	// Third pass: enrich ledgers from pidx=0 pages (contact/tax details)
 	for _, page := range pages {
 		if page.Header.ObjType != 0x000B && page.Header.ObjType != 0x0000 {
 			continue

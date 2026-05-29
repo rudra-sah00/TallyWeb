@@ -123,6 +123,15 @@ func decodeFields(page []byte) []Field {
 				i += 12
 				continue
 			}
+			// Type 0x09: same as 0x08 (int64 amount, divisor 100000) — used for opening balances
+			if fid > 0 && fid < 0x5000 && page[i+2] == 0x00 && page[i+3] == 0x09 {
+				val := int64(binary.LittleEndian.Uint64(page[i+4 : i+12]))
+				if val != 0 {
+					fields = append(fields, Field{ID: fid, Type: 'L', Int64: val})
+				}
+				i += 12
+				continue
+			}
 		}
 
 		// 4-byte numeric field: [fid LE16] 00 06 [value LE32]

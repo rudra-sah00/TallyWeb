@@ -359,7 +359,7 @@ func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
 		return subGroup
 	}
 
-	// Aggregate debit/credit by primary group (double entry)
+	// Add opening balances from ledger masters
 	groupBal := make(map[string]*TrialBalanceEntry)
 	addEntry := func(group string, debit, credit float64) {
 		e, ok := groupBal[group]
@@ -370,6 +370,23 @@ func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
 		e.Debit += debit
 		e.Credit += credit
 	}
+
+	for _, l := range masters.Ledgers {
+		if l.OpeningBal == 0 {
+			continue
+		}
+		group := resolve(l.Parent)
+		if group == "" {
+			continue
+		}
+		if l.OpeningBal < 0 {
+			addEntry(group, -l.OpeningBal, 0) // negative = debit in Tally
+		} else {
+			addEntry(group, 0, l.OpeningBal) // positive = credit
+		}
+	}
+
+	// Aggregate debit/credit by primary group (double entry)
 
 	for _, v := range vouchers {
 		if v.Party == "" || v.Amount == 0 {
