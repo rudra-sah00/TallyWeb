@@ -1,5 +1,7 @@
 package tallydb
 
+import "time"
+
 // LedgerBalance is a computed balance for a ledger/party.
 type LedgerBalance struct {
 	Name    string  `json:"name"`
@@ -164,4 +166,63 @@ func (db *DB) GetOverview(folderName string) (*DashboardOverview, error) {
 		}
 	}
 	return o, nil
+}
+
+// AgingEntry is an aging analysis entry for a party.
+type AgingEntry struct {
+	Party    string  `json:"party"`
+	Total    float64 `json:"total"`
+	Current  float64 `json:"current"`   // 0-30 days
+	Days30   float64 `json:"days_30"`   // 31-60 days
+	Days60   float64 `json:"days_60"`   // 61-90 days
+	Days90   float64 `json:"days_90"`   // 90+ days
+}
+
+// ComputeAging calculates outstanding aging by party.
+func (db *DB) ComputeAging(folderName string) ([]AgingEntry, error) {
+	vouchers, err := db.GetVouchers(folderName)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	aging := make(map[string]*AgingEntry)
+	for _, v := range vouchers {
+		if v.Type != "Sales" || v.Amount == 0 || v.Party == "" {
+			continue
+		}
+		days := daysOld(v.Date, now)
+		e, ok := aging[v.Party]
+		if !ok {
+			e = &AgingEntry{Party: v.Party}
+			aging[v.Party] = e
+		}
+		e.Total += v.Amount
+		switch {
+		case days <= 30:
+			e.Current += v.Amount
+		case days <= 60:
+			e.Days30 += v.Amount
+		case days <= 90:
+			e.Days60 += v.Amount
+		default:
+			e.Days90 += v.Amount
+		}
+	}
+	var result []AgingEntry
+	for _, e := range aging {
+		result = append(result, *e)
+	}
+	return result, nil
+}
+
+func daysOld(dateStr string, now time.Time) int {
+	if len(dateStr) != 10 {
+		return 0
+	}
+	// DD-MM-YYYY
+	t, err := time.Parse("02-01-2006", dateStr)
+	if err != nil {
+		return 0
+	}
+	return int(now.Sub(t).Hours() / 24)
 }

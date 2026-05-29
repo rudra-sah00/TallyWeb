@@ -1,6 +1,9 @@
 package handler
 
-import "net/http"
+import (
+	"net/http"
+	"sort"
+)
 
 type ReportHandler struct{ Base }
 
@@ -77,6 +80,37 @@ func (h *ReportHandler) Outstanding(w http.ResponseWriter, r *http.Request) {
 func (h *ReportHandler) StockBalance(w http.ResponseWriter, r *http.Request) {
 	folder := h.CompanyFolder(r)
 	data, err := h.DB.ComputeStockBalance(folder)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, data)
+}
+
+func (h *ReportHandler) DayBook(w http.ResponseWriter, r *http.Request) {
+	folder := h.CompanyFolder(r)
+	vouchers, err := h.DB.GetVouchers(folder)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Sort by date (DD-MM-YYYY format)
+	sort.Slice(vouchers, func(i, j int) bool {
+		di, dj := vouchers[i].Date, vouchers[j].Date
+		if len(di) == 10 && len(dj) == 10 {
+			// Convert DD-MM-YYYY to YYYY-MM-DD for sorting
+			yi := di[6:10] + di[3:5] + di[0:2]
+			yj := dj[6:10] + dj[3:5] + dj[0:2]
+			return yi < yj
+		}
+		return di < dj
+	})
+	WriteJSON(w, http.StatusOK, vouchers)
+}
+
+func (h *ReportHandler) Aging(w http.ResponseWriter, r *http.Request) {
+	folder := h.CompanyFolder(r)
+	data, err := h.DB.ComputeAging(folder)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -566,7 +566,7 @@ func hasField(fields []Field, id uint16) bool {
 }
 
 // inferSystemLedgerGroup determines the parent group for system/built-in ledgers.
-// These are Tally's standard account names — same across ALL Tally installations.
+// Only uses Tally-standard patterns (same across ALL Tally installations).
 func inferSystemLedgerGroup(name string) string {
 	switch name {
 	case "Cash":
@@ -580,18 +580,14 @@ func inferSystemLedgerGroup(name string) string {
 		strings.HasPrefix(name, "Output SGST") || strings.HasPrefix(name, "Output IGST") ||
 		strings.HasPrefix(name, "GST ") || strings.HasPrefix(name, "GST Payble") ||
 		strings.HasPrefix(name, "GST Reverse") ||
-		// Truncated header names from binary (e.g., "ST @9%", "GST @14%")
 		(strings.HasPrefix(name, "ST @") && strings.Contains(name, "%")) ||
 		(strings.HasPrefix(name, "GST @") && strings.Contains(name, "%")) ||
-		strings.HasSuffix(name, "GST") || strings.Contains(name, "SGST") || strings.Contains(name, "CGST") || strings.Contains(name, "IGST"):
+		strings.Contains(name, "SGST") || strings.Contains(name, "CGST") || strings.Contains(name, "IGST"):
 		return "Duties & Taxes"
 	case strings.Contains(name, "ODA-") || strings.Contains(name, "OD A/c"):
 		return "Bank OD A/c"
-	case strings.Contains(name, "SBI") || strings.Contains(name, "AGCCA") ||
-		strings.Contains(name, "CA -") || strings.Contains(name, "SBA -"):
+	case strings.HasPrefix(name, "SBI") || strings.Contains(name, "AGCCA"):
 		return "Bank Accounts"
-	case strings.Contains(name, "SECURITY DEPOSIT") || strings.Contains(name, "CEMENT LTD") || strings.Contains(name, "HSIL"):
-		return "Deposits (Asset)"
 	default:
 		return "Sundry Debtors"
 	}

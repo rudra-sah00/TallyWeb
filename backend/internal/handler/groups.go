@@ -3,6 +3,8 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/rudra/tallyweb-backend/internal/tallydb"
 )
 
 type GroupHandler struct{ Base }
@@ -14,7 +16,24 @@ func (h *GroupHandler) List(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, masters.Groups)
+	// Filter to groups that are actually used as ledger parents
+	usedGroups := make(map[string]bool)
+	for _, l := range masters.Ledgers {
+		if l.Parent != "" {
+			usedGroups[l.Parent] = true
+		}
+	}
+	var filtered []tallydb.Group
+	for _, g := range masters.Groups {
+		if usedGroups[g.Name] {
+			filtered = append(filtered, g)
+		}
+	}
+	// If filtering gives too few, include known Tally primary groups
+	if len(filtered) < 5 {
+		filtered = masters.Groups
+	}
+	WriteJSON(w, http.StatusOK, filtered)
 }
 
 func (h *GroupHandler) Create(w http.ResponseWriter, r *http.Request) {
