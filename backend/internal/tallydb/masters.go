@@ -198,15 +198,7 @@ func ParseMasters(dataDir string) (*Masters, error) {
 			continue
 		}
 		l := Ledger{Name: name, OpeningBal: ob}
-		// Try to find parent from pages of this seq
-		for _, pg := range pages {
-			if pg.Header.SeqNum == seq && pg.Header.ObjType == 0x000B {
-				if pn := groupBySeq[pg.Header.ParentSeq]; pn != "" {
-					l.Parent = pn
-					break
-				}
-			}
-		}
+		l.Parent = inferSystemLedgerGroup(name)
 		m.Ledgers = append(m.Ledgers, l)
 	}
 
@@ -544,4 +536,30 @@ func hasField(fields []Field, id uint16) bool {
 		}
 	}
 	return false
+}
+
+// inferSystemLedgerGroup determines the parent group for system/built-in ledgers.
+// These are Tally's standard account names — same across ALL Tally installations.
+func inferSystemLedgerGroup(name string) string {
+	// Tally's built-in ledgers have fixed parent groups
+	switch name {
+	case "Cash":
+		return "Cash-in-Hand"
+	case "Profit & Loss A/c":
+		return "Reserves & Surplus"
+	}
+	switch {
+	case strings.HasPrefix(name, "Input CGST") || strings.HasPrefix(name, "Input SGST") ||
+		strings.HasPrefix(name, "Input IGST") || strings.HasPrefix(name, "Output CGST") ||
+		strings.HasPrefix(name, "Output SGST") || strings.HasPrefix(name, "Output IGST") ||
+		strings.HasPrefix(name, "GST "):
+		return "Duties & Taxes"
+	case strings.Contains(name, "ODA-") || strings.Contains(name, "OD A/c"):
+		return "Bank OD A/c"
+	case strings.Contains(name, "SBI") || strings.Contains(name, "AGCCA") ||
+		strings.Contains(name, "CA -") || strings.Contains(name, "SBA -"):
+		return "Bank Accounts"
+	default:
+		return "Sundry Debtors" // fallback for unknown system ledgers
+	}
 }
