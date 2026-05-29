@@ -21,11 +21,12 @@ type FileHeader struct {
 
 // PageHeader is the header of each data page.
 type PageHeader struct {
-	Checksum uint32
-	SeqNum   uint32
-	PageIdx  uint32
-	Flags    uint32
-	ObjType  uint16
+	Checksum  uint32
+	SeqNum    uint32
+	PageIdx   uint32
+	Flags     uint32
+	ObjType   uint16
+	ParentSeq uint32 // bytes 28-31: parent group seq (for ledger pidx=4 pages)
 }
 
 // Field is a decoded field from a page.
@@ -72,11 +73,12 @@ func ParsePages(data []byte) []Page {
 
 		page := Page{Offset: int64(offset)}
 		page.Header = PageHeader{
-			Checksum: binary.LittleEndian.Uint32(pageData[0:4]),
-			SeqNum:   binary.LittleEndian.Uint32(pageData[4:8]),
-			PageIdx:  binary.LittleEndian.Uint32(pageData[8:12]),
-			Flags:    binary.LittleEndian.Uint32(pageData[12:16]),
-			ObjType:  binary.LittleEndian.Uint16(pageData[16:18]),
+			Checksum:  binary.LittleEndian.Uint32(pageData[0:4]),
+			SeqNum:    binary.LittleEndian.Uint32(pageData[4:8]),
+			PageIdx:   binary.LittleEndian.Uint32(pageData[8:12]),
+			Flags:     binary.LittleEndian.Uint32(pageData[12:16]),
+			ObjType:   binary.LittleEndian.Uint16(pageData[16:18]),
+			ParentSeq: binary.LittleEndian.Uint32(pageData[28:32]),
 		}
 		page.Fields = decodeFields(pageData)
 		if len(page.Fields) > 0 {

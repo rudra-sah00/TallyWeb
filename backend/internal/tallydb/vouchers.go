@@ -41,6 +41,7 @@ type VoucherItem struct {
 }
 
 // ParseVouchers reads TranMgr.1800/.900 and extracts voucher records.
+// Uses seq-based grouping: groups all pages by SeqNum, then processes each group.
 func ParseVouchers(dataDir string) ([]Voucher, error) {
 	path := ResolveFile(dataDir, "TranMgr")
 	if path == "" {
@@ -51,54 +52,69 @@ func ParseVouchers(dataDir string) ([]Voucher, error) {
 		return nil, err
 	}
 
-	var vouchers []Voucher
-	var current *Voucher
-
+	// Group pages by sequence number
+	seqGroups := make(map[uint32][]Page)
+	var seqOrder []uint32
 	for _, page := range pages {
-		if isVoucherHeaderPage(page.Fields) {
-			if current != nil && (current.Number != "" || current.Party != "") {
-				vouchers = append(vouchers, *current)
-			}
-			current = &Voucher{}
-			for _, f := range page.Fields {
-				enrichVoucher(current, f, page.Header.PageIdx)
-			}
-		} else if current != nil {
-			if isVoucherItemPage(page.Fields) {
-				current.Items = append(current.Items, parseVoucherItems(page.Fields)...)
-			}
-			for _, f := range page.Fields {
-				enrichVoucher(current, f, page.Header.PageIdx)
+		seq := page.Header.SeqNum
+		if seq == 0 {
+			continue
+		}
+		if _, exists := seqGroups[seq]; !exists {
+			seqOrder = append(seqOrder, seq)
+		}
+		seqGroups[seq] = append(seqGroups[seq], page)
+	}
+
+	// Process each seq group as a potential voucher
+	var vouchers []Voucher
+	for _, seq := range seqOrder {
+		group := seqGroups[seq]
+		// Only consider groups that have at least one type=0x0005 page
+		hasDataPage := false
+		for _, p := range group {
+			if p.Header.ObjType == 0x0005 {
+				hasDataPage = true
+				break
 			}
 		}
+		if !hasDataPage {
+			continue
+		}
+
+		v := Voucher{}
+		for _, p := range group {
+			if isVoucherItemPage(p.Fields) {
+				v.Items = append(v.Items, parseVoucherItems(p.Fields)...)
+			}
+			for _, f := range p.Fields {
+				enrichVoucher(&v, f, p.Header.PageIdx)
+			}
+		}
+		if v.Number != "" || v.Party != "" {
+			vouchers = append(vouchers, v)
+		}
 	}
-	if current != nil && (current.Number != "" || current.Party != "") {
-		vouchers = append(vouchers, *current)
-	}
+
 	for i := range vouchers {
-		if vouchers[i].Type == "" && len(vouchers[i].Items) > 0 {
-			vouchers[i].Type = "Sales"
+		if vouchers[i].Type != "" {
+			continue
 		}
-		if vouchers[i].Type == "" && vouchers[i].Number != "" && len(vouchers[i].Number) > 3 && vouchers[i].Number[2] == '/' {
-			switch vouchers[i].Number[:2] {
-			case "SS": vouchers[i].Type = "Sales"
-			case "SP": vouchers[i].Type = "Purchase"
-			}
-		}
+		// Type will be determined by ledger group mapping after return
 	}
 	return vouchers, nil
 }
 
 func isVoucherHeaderPage(fields []Field) bool {
+	// A page starts a new voucher if it has party name (0x000D) + GST type (0x000F)
+	hasParty := false
+	hasGST := false
 	for _, f := range fields {
-		if f.ID == FldVchUser && f.Type == 'S' {
-			return true
-		}
-		if f.ID == 0x00CC && f.Type == 'S' {
-			return true
-		}
+		if f.ID == 0x000D && f.Type == 'S' { hasParty = true }
+		if f.ID == 0x000F && f.Type == 'S' { hasGST = true }
+		if f.ID == 0x0006 && f.Type == 'S' && len(f.Str) >= 1 { return true }
 	}
-	return false
+	return hasParty && hasGST
 }
 
 func isVoucherItemPage(fields []Field) bool {
@@ -229,9 +245,11 @@ func enrichVoucher(v *Voucher, f Field, pidx uint32) {
 		month := 1
 		for _, md := range []int{31,28,31,30,31,30,31,31,30,31,30,31} { m:=md; if month==2 && ((year%4==0 && year%100!=0) || year%400==0) { m=29 }; if days<m { break }; days-=m; month++ }
 		v.Date = fmt.Sprintf("%02d-%02d-%04d", days+1, month, year)
-	case f.Type == 'L' && f.ID == 0x0008 && v.Amount == 0 && (pidx == 1 || pidx == 3):
+	case f.Type == 'L' && f.ID == 0x0008 && v.Amount == 0:
 		amt := float64(f.Int64) / 100000.0
-		if amt > 1 && amt < 10000000 { v.Amount = amt }
+		if amt > 1 && amt < 10000000 {
+			v.Amount = amt
+		}
 	}
 }
 

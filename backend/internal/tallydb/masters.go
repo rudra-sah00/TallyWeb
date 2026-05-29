@@ -92,9 +92,29 @@ func ParseMasters(dataDir string) (*Masters, error) {
 	seenGroups := make(map[string]bool)
 	seenUnits := make(map[string]bool)
 
-	// First pass: collect ledger names by seq (from pidx=2 pages)
+	// Build group seq → name map from low-seq pages (pidx=1 or pidx=2 with fid=0x0002)
+	groupBySeq := make(map[uint32]string)
+	for _, page := range pages {
+		seq := page.Header.SeqNum
+		if seq > 100 {
+			continue
+		}
+		pidx := page.Header.PageIdx
+		if pidx != 1 && pidx != 2 {
+			continue
+		}
+		name := getFieldStr(page.Fields, FldName)
+		if name != "" && groupBySeq[seq] == "" {
+			groupBySeq[seq] = name
+		}
+	}
+
+	// First pass: collect ledger names by seq (from pidx=4 type=0x000B pages with FldLedgerName)
 	ledgerSeqs := make(map[uint32]int) // seq -> index in m.Ledgers
 	for _, page := range pages {
+		if page.Header.PageIdx != 4 || page.Header.ObjType != 0x000B {
+			continue
+		}
 		fields := page.Fields
 		if !hasField(fields, FldLedgerName) {
 			continue
@@ -111,6 +131,10 @@ func ParseMasters(dataDir string) (*Masters, error) {
 			continue
 		}
 		l := parseLedger(fields)
+		// Assign parent group from header[28:32]
+		if parentName := groupBySeq[page.Header.ParentSeq]; parentName != "" {
+			l.Parent = parentName
+		}
 		ledgerSeqs[page.Header.SeqNum] = len(m.Ledgers)
 		m.Ledgers = append(m.Ledgers, l)
 	}
@@ -186,7 +210,7 @@ func ParseMasters(dataDir string) (*Masters, error) {
 		}
 	}
 
-	// Third pass: groups from pidx=2 pages without ledger name
+	// Third pass: groups from groupBySeq map (built from low-seq pidx=1/2 pages)
 	for _, page := range pages {
 		ot := page.Header.ObjType
 		if (ot == 0x000B || ot == 0x0000) && page.Header.PageIdx == 2 && !hasField(page.Fields, FldLedgerName) && hasField(page.Fields, FldName) {
@@ -195,6 +219,13 @@ func ParseMasters(dataDir string) (*Masters, error) {
 				seenGroups[g.Name] = true
 				m.Groups = append(m.Groups, g)
 			}
+		}
+	}
+	// Also add groups from groupBySeq that weren't found in third pass
+	for _, name := range groupBySeq {
+		if !seenGroups[name] {
+			seenGroups[name] = true
+			m.Groups = append(m.Groups, Group{Name: name})
 		}
 	}
 

@@ -184,7 +184,58 @@ func (db *DB) createMaster(folderName, templateName, newName string) (uint32, er
 }
 
 func (db *DB) GetVouchers(folderName string) ([]Voucher, error) {
-	return ParseVouchers(db.CompanyDir(folderName))
+	vouchers, err := ParseVouchers(db.CompanyDir(folderName))
+	if err != nil {
+		return nil, err
+	}
+	// Infer voucher type from party's ledger group
+	masters, err := db.GetMasters(folderName)
+	if err != nil {
+		return vouchers, nil
+	}
+	// Get company name to detect purchases (party = own company)
+	companyInfo, _ := db.GetCompanyInfo(folderName)
+	companyName := ""
+	if companyInfo != nil {
+		companyName = companyInfo.Name
+	}
+
+	ledgerGroup := make(map[string]string)
+	for _, l := range masters.Ledgers {
+		if l.Parent != "" {
+			ledgerGroup[l.Name] = l.Parent
+		}
+	}
+	for i := range vouchers {
+		if vouchers[i].Type != "" {
+			continue
+		}
+		party := vouchers[i].Party
+		// If party is the company itself → Purchase
+		if companyName != "" && (party == companyName || strings.HasPrefix(party, companyName[:min(len(companyName), 15)])) {
+			vouchers[i].Type = "Purchase"
+			continue
+		}
+		group := ledgerGroup[party]
+		switch group {
+		case "Sundry Debtors":
+			vouchers[i].Type = "Sales"
+		case "Sundry Creditors":
+			vouchers[i].Type = "Purchase"
+		case "Cash-in-Hand", "Cash-in-hand", "Bank Accounts", "Bank OD A/c":
+			vouchers[i].Type = "Payment"
+		default:
+			if len(vouchers[i].Items) > 0 {
+				vouchers[i].Type = "Sales"
+			}
+		}
+	}
+	return vouchers, nil
+}
+
+func min(a, b int) int {
+	if a < b { return a }
+	return b
 }
 
 // GetBankEntries returns banking transactions from LinkMgr.
@@ -239,32 +290,116 @@ func (db *DB) GetVouchersByParty(folderName, party string) []Voucher {
 	return result
 }
 
-// TrialBalance returns debit/credit totals per party.
+// TrialBalanceEntry is a group-wise trial balance line.
 type TrialBalanceEntry struct {
-	Ledger string  `json:"ledger"`
+	Group  string  `json:"group"`
 	Debit  float64 `json:"debit"`
 	Credit float64 `json:"credit"`
 }
 
+// tallyPrimaryGroup maps sub-groups to Tally's primary (top-level) groups.
+var tallyPrimaryGroup = map[string]string{
+	"Sundry Debtors":         "Current Assets",
+	"Sundry Creditors":       "Current Liabilities",
+	"Cash-in-Hand":           "Current Assets",
+	"Cash-in-hand":           "Current Assets",
+	"Bank Accounts":          "Current Assets",
+	"Bank OD A/c":            "Loans (Liability)",
+	"Bank OCC A/c":           "Loans (Liability)",
+	"Deposits (Asset)":       "Current Assets",
+	"Loans & Advances (Asset)": "Current Assets",
+	"Stock-in-Hand":          "Current Assets",
+	"Stock-in-hand":          "Current Assets",
+	"Duties & Taxes":         "Current Liabilities",
+	"Provisions":             "Current Liabilities",
+	"Secured Loans":          "Loans (Liability)",
+	"Unsecured Loans":        "Loans (Liability)",
+	"Capital Account":        "Loans (Liability)",
+	"Reserves & Surplus":     "Loans (Liability)",
+	"Suspense A/c":           "Current Assets",
+	"Branch / Divisions":     "Current Assets",
+	"Misc. Expenses (ASSET)": "Current Assets",
+	// Primary groups map to themselves
+	"Current Assets":       "Current Assets",
+	"Current Liabilities":  "Current Liabilities",
+	"Fixed Assets":         "Fixed Assets",
+	"Investments":          "Investments",
+	"Loans (Liability)":    "Loans (Liability)",
+	"Sales Accounts":       "Sales Accounts",
+	"Purchase Accounts":    "Purchase Accounts",
+	"Direct Incomes":       "Direct Incomes",
+	"Direct Expenses":      "Direct Expenses",
+	"Indirect Incomes":     "Indirect Incomes",
+	"Indirect Expenses":    "Indirect Expenses",
+}
+
 func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
+	masters, err := db.GetMasters(folderName)
+	if err != nil {
+		return nil, err
+	}
 	vouchers, err := db.GetVouchers(folderName)
 	if err != nil {
 		return nil, err
 	}
-	balances := make(map[string]*TrialBalanceEntry)
+
+	// Build ledger name → parent group map
+	ledgerGroup := make(map[string]string)
+	for _, l := range masters.Ledgers {
+		if l.Parent != "" {
+			ledgerGroup[l.Name] = l.Parent
+		}
+	}
+
+	// Helper to resolve primary group
+	resolve := func(subGroup string) string {
+		if p := tallyPrimaryGroup[subGroup]; p != "" {
+			return p
+		}
+		return subGroup
+	}
+
+	// Aggregate debit/credit by primary group (double entry)
+	groupBal := make(map[string]*TrialBalanceEntry)
+	addEntry := func(group string, debit, credit float64) {
+		e, ok := groupBal[group]
+		if !ok {
+			e = &TrialBalanceEntry{Group: group}
+			groupBal[group] = e
+		}
+		e.Debit += debit
+		e.Credit += credit
+	}
+
 	for _, v := range vouchers {
 		if v.Party == "" || v.Amount == 0 {
 			continue
 		}
-		e, ok := balances[v.Party]
-		if !ok {
-			e = &TrialBalanceEntry{Ledger: v.Party}
-			balances[v.Party] = e
+		partyGroup := resolve(ledgerGroup[v.Party])
+		if partyGroup == "" {
+			partyGroup = "Current Assets"
 		}
-		e.Debit += v.Amount
+
+		switch v.Type {
+		case "Sales":
+			addEntry(partyGroup, v.Amount, 0)     // Dr party (debtor)
+			addEntry("Sales Accounts", 0, v.Amount) // Cr sales
+		case "Purchase":
+			addEntry("Purchase Accounts", v.Amount, 0) // Dr purchases
+			addEntry(partyGroup, 0, v.Amount)           // Cr party (creditor)
+		case "Receipt":
+			addEntry("Current Assets", v.Amount, 0) // Dr cash/bank
+			addEntry(partyGroup, 0, v.Amount)        // Cr party
+		case "Payment":
+			addEntry(partyGroup, v.Amount, 0)        // Dr party
+			addEntry("Current Assets", 0, v.Amount)  // Cr cash/bank
+		default:
+			addEntry(partyGroup, v.Amount, 0)
+		}
 	}
+
 	var result []TrialBalanceEntry
-	for _, e := range balances {
+	for _, e := range groupBal {
 		result = append(result, *e)
 	}
 	return result, nil
