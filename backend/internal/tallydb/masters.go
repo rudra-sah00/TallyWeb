@@ -1,7 +1,9 @@
 package tallydb
 
 import (
+	"encoding/binary"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -172,6 +174,7 @@ func ParseMasters(dataDir string) (*Masters, error) {
 		}
 	}
 	// For OBs on unknown seqs, find their name from fid=0x0002 or 0x01F7 on same seq
+	// Also try reading UTF-16 string at page offset 28 (header name for system ledgers)
 	nameBySeq := make(map[uint32]string)
 	for _, page := range pages {
 		seq := page.Header.SeqNum
@@ -188,6 +191,30 @@ func ParseMasters(dataDir string) (*Masters, error) {
 			if f.Type == 'S' && (f.ID == 0x01F7 || f.ID == FldName) && f.Str != "" && len(f.Str) > 2 {
 				nameBySeq[seq] = f.Str
 				break
+			}
+		}
+	}
+	// Second attempt: read raw header string at offset 28 for seqs still without names
+	rawData, _ := os.ReadFile(path)
+	if rawData != nil {
+		for pg := 1; pg < len(rawData)/PageSize; pg++ {
+			off := pg * PageSize
+			pageData := rawData[off : off+PageSize]
+			seq := binary.LittleEndian.Uint32(pageData[4:8])
+			if _, need := obBySeq[seq]; !need { continue }
+			if _, already := ledgerSeqs[seq]; already { continue }
+			if nameBySeq[seq] != "" { continue }
+			pidx := binary.LittleEndian.Uint32(pageData[8:12])
+			if pidx != 0 { continue }
+			if binary.LittleEndian.Uint16(pageData[16:18]) != 0x000B { continue }
+			// Read UTF-16 at offset 28 until null terminator
+			end := 28
+			for end < PageSize-1 && !(pageData[end] == 0 && pageData[end+1] == 0) { end += 2 }
+			if end > 30 {
+				s := decodeUTF16(pageData[28:end])
+				if s != "" && len(s) > 2 {
+					nameBySeq[seq] = s
+				}
 			}
 		}
 	}
@@ -541,7 +568,6 @@ func hasField(fields []Field, id uint16) bool {
 // inferSystemLedgerGroup determines the parent group for system/built-in ledgers.
 // These are Tally's standard account names — same across ALL Tally installations.
 func inferSystemLedgerGroup(name string) string {
-	// Tally's built-in ledgers have fixed parent groups
 	switch name {
 	case "Cash":
 		return "Cash-in-Hand"
@@ -552,14 +578,21 @@ func inferSystemLedgerGroup(name string) string {
 	case strings.HasPrefix(name, "Input CGST") || strings.HasPrefix(name, "Input SGST") ||
 		strings.HasPrefix(name, "Input IGST") || strings.HasPrefix(name, "Output CGST") ||
 		strings.HasPrefix(name, "Output SGST") || strings.HasPrefix(name, "Output IGST") ||
-		strings.HasPrefix(name, "GST "):
+		strings.HasPrefix(name, "GST ") || strings.HasPrefix(name, "GST Payble") ||
+		strings.HasPrefix(name, "GST Reverse") ||
+		// Truncated header names from binary (e.g., "ST @9%", "GST @14%")
+		(strings.HasPrefix(name, "ST @") && strings.Contains(name, "%")) ||
+		(strings.HasPrefix(name, "GST @") && strings.Contains(name, "%")) ||
+		strings.HasSuffix(name, "GST") || strings.Contains(name, "SGST") || strings.Contains(name, "CGST") || strings.Contains(name, "IGST"):
 		return "Duties & Taxes"
 	case strings.Contains(name, "ODA-") || strings.Contains(name, "OD A/c"):
 		return "Bank OD A/c"
 	case strings.Contains(name, "SBI") || strings.Contains(name, "AGCCA") ||
 		strings.Contains(name, "CA -") || strings.Contains(name, "SBA -"):
 		return "Bank Accounts"
+	case strings.Contains(name, "SECURITY DEPOSIT") || strings.Contains(name, "CEMENT LTD") || strings.Contains(name, "HSIL"):
+		return "Deposits (Asset)"
 	default:
-		return "Sundry Debtors" // fallback for unknown system ledgers
+		return "Sundry Debtors"
 	}
 }
