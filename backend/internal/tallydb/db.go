@@ -1,0 +1,568 @@
+package tallydb
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Company holds details from Company.1800/.900.
+type Company struct {
+	Name        string   `json:"name"`
+	Folder      string   `json:"folder,omitempty"`
+	Address     []string `json:"address,omitempty"`
+	Email       string   `json:"email,omitempty"`
+	Phone       string   `json:"phone,omitempty"`
+	State       string   `json:"state,omitempty"`
+	Country     string   `json:"country,omitempty"`
+	Pincode     string   `json:"pincode,omitempty"`
+	GSTIN       string   `json:"gstin,omitempty"`
+	PAN         string   `json:"pan,omitempty"`
+	Proprietor  string   `json:"proprietor,omitempty"`
+	Designation string   `json:"designation,omitempty"`
+	FirmName    string   `json:"firm_name,omitempty"`
+}
+
+// DB is the main interface to read Tally data from files.
+type DB struct {
+	DataPath  string   // Root data path (contains company folders)
+	Companies []string // List of company folder names
+}
+
+// Open locates the Tally data folder and lists available companies.
+func Open(dataPath string) (*DB, error) {
+	entries, err := os.ReadDir(dataPath)
+	if err != nil {
+		return nil, fmt.Errorf("open data dir: %w", err)
+	}
+
+	db := &DB{DataPath: dataPath}
+	for _, e := range entries {
+		if e.IsDir() {
+			dir := filepath.Join(dataPath, e.Name())
+			if hasManagerFile(dir) {
+				db.Companies = append(db.Companies, e.Name())
+			}
+		}
+	}
+	if len(db.Companies) == 0 {
+		return nil, fmt.Errorf("no company data found in %s", dataPath)
+	}
+	return db, nil
+}
+
+// CompanyDir returns the full path to a company's data folder.
+func (db *DB) CompanyDir(folderName string) string {
+	return filepath.Join(db.DataPath, folderName)
+}
+
+// GetCompanyInfo reads Company.1800/.900 for a given company folder.
+func (db *DB) GetCompanyInfo(folderName string) (*Company, error) {
+	path := ResolveFile(filepath.Join(db.DataPath, folderName), "Company")
+	if path == "" {
+		return &Company{Name: folderName}, nil
+	}
+	pages, err := ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	c := &Company{Folder: folderName}
+	for _, page := range pages {
+		for _, f := range page.Fields {
+			if f.Type != 'S' {
+				continue
+			}
+			switch f.ID {
+			case 0x001B: // Company name
+				if c.Name == "" {
+					c.Name = f.Str
+				}
+			case 0x001D: // Address lines
+				c.Address = append(c.Address, f.Str)
+			case 0x0066: // Email
+				if c.Email == "" {
+					c.Email = f.Str
+				}
+			case 0x0067: // State
+				if c.State == "" {
+					c.State = f.Str
+				}
+			case 0x0068: // Pincode
+				if c.Pincode == "" {
+					c.Pincode = f.Str
+				}
+			case 0x00CA: // PAN
+				if c.PAN == "" {
+					c.PAN = f.Str
+				}
+			case 0x00D2: // Country
+				if c.Country == "" {
+					c.Country = f.Str
+				}
+			case 0x09C8: // Phone
+				if c.Phone == "" {
+					c.Phone = f.Str
+				}
+			case 0x0284: // Proprietor name
+				if c.Proprietor == "" {
+					c.Proprietor = f.Str
+				}
+			case 0x0286: // Designation
+				if c.Designation == "" {
+					c.Designation = f.Str
+				}
+			case 0x026F: // Firm name
+				if c.FirmName == "" {
+					c.FirmName = f.Str
+				}
+			case 0x0C82, FldGSTIN: // GSTIN
+				if c.GSTIN == "" && len(f.Str) == 15 {
+					c.GSTIN = f.Str
+				}
+			}
+		}
+	}
+	return c, nil
+}
+
+// ListCompanies returns company info for all detected companies.
+func (db *DB) ListCompanies() []Company {
+	var companies []Company
+	for _, folder := range db.Companies {
+		info, err := db.GetCompanyInfo(folder)
+		if err != nil || info.Name == "" {
+			companies = append(companies, Company{Name: folder})
+		} else {
+			companies = append(companies, *info)
+		}
+	}
+	return companies
+}
+
+// GetMasters reads all masters for a company folder.
+func (db *DB) GetMasters(folderName string) (*Masters, error) {
+	return ParseMasters(db.CompanyDir(folderName))
+}
+
+// GetVouchers reads all vouchers for a company folder.
+// CreateLedger writes a new ledger to the company's Manager.1800 file.
+func (db *DB) CreateLedger(folderName, templateName, newName string) (uint32, error) {
+	return db.createMaster(folderName, templateName, newName)
+}
+
+// CreateStockItem writes a new stock item to Manager.1800.
+func (db *DB) CreateStockItem(folderName, templateName, newName string) (uint32, error) {
+	return db.createMaster(folderName, templateName, newName)
+}
+
+// CreateGroup writes a new group to Manager.1800.
+func (db *DB) CreateGroup(folderName, templateName, newName string) (uint32, error) {
+	return db.createMaster(folderName, templateName, newName)
+}
+
+func (db *DB) createMaster(folderName, templateName, newName string) (uint32, error) {
+	managerPath := ResolveFile(filepath.Join(db.DataPath, folderName), "Manager")
+	if managerPath == "" {
+		return 0, fmt.Errorf("Manager.1800 not found for company %s", folderName)
+	}
+	w, err := OpenWriter(managerPath)
+	if err != nil {
+		return 0, err
+	}
+	seq, err := w.writeMaster(templateName, newName)
+	if err != nil {
+		return 0, err
+	}
+	if err := w.Save(); err != nil {
+		return 0, err
+	}
+	DeleteIndexFiles(filepath.Join(db.DataPath, folderName))
+	return seq, nil
+}
+
+func (db *DB) GetVouchers(folderName string) ([]Voucher, error) {
+	vouchers, err := ParseVouchers(db.CompanyDir(folderName))
+	if err != nil {
+		return nil, err
+	}
+	// Infer voucher type from party's ledger group
+	masters, err := db.GetMasters(folderName)
+	if err != nil {
+		return vouchers, nil
+	}
+	// Get company name to detect purchases (party = own company)
+	companyInfo, _ := db.GetCompanyInfo(folderName)
+	companyName := ""
+	if companyInfo != nil {
+		companyName = companyInfo.Name
+	}
+
+	ledgerGroup := make(map[string]string)
+	for _, l := range masters.Ledgers {
+		if l.Parent != "" {
+			ledgerGroup[l.Name] = l.Parent
+		}
+	}
+	for i := range vouchers {
+		if vouchers[i].Type != "" {
+			continue
+		}
+		party := vouchers[i].Party
+		// If party is the company itself → Purchase
+		if companyName != "" && (party == companyName || strings.HasPrefix(party, companyName[:min(len(companyName), 15)])) {
+			vouchers[i].Type = "Purchase"
+			continue
+		}
+		group := ledgerGroup[party]
+		switch group {
+		case "Sundry Debtors":
+			vouchers[i].Type = "Sales"
+		case "Sundry Creditors":
+			vouchers[i].Type = "Purchase"
+		case "Cash-in-Hand", "Cash-in-hand", "Bank Accounts", "Bank OD A/c":
+			// Cash/Bank party with items or amount = Cash Sale, otherwise = Payment
+			if len(vouchers[i].Items) > 0 || vouchers[i].Amount > 0 {
+				vouchers[i].Type = "Sales"
+			} else {
+				vouchers[i].Type = "Payment"
+			}
+		default:
+			if len(vouchers[i].Items) > 0 || vouchers[i].Amount > 0 {
+				vouchers[i].Type = "Sales"
+			}
+		}
+	}
+	// Filter out system entries (Opening Entry etc.) with no useful data
+	filtered := vouchers[:0]
+	for _, v := range vouchers {
+		if v.Number == "OE" && v.Party == "" && v.Amount == 0 {
+			continue
+		}
+		filtered = append(filtered, v)
+	}
+	return filtered, nil
+}
+
+func min(a, b int) int {
+	if a < b { return a }
+	return b
+}
+
+// GetBankEntries returns banking transactions from LinkMgr.
+func (db *DB) GetBankEntries(folderName string) ([]BankEntry, error) {
+	return ParseBankEntries(db.CompanyDir(folderName))
+}
+
+// GetGSTReturns returns pre-computed GST data from Aggr.1800.
+func (db *DB) GetGSTReturns(folderName string) ([]GSTReturn, error) {
+	return ParseGSTReturns(db.CompanyDir(folderName))
+}
+
+// GetUnits returns all measurement units.
+func (db *DB) GetUnits(folderName string) ([]Unit, error) {
+	m, err := db.GetMasters(folderName)
+	if err != nil {
+		return nil, err
+	}
+	return m.Units, nil
+}
+
+// GetVouchersByType filters vouchers by type.
+func (db *DB) GetVouchersByType(folderName, vtype string) ([]Voucher, error) {
+	all, err := db.GetVouchers(folderName)
+	if err != nil {
+		return nil, err
+	}
+	if vtype == "" {
+		return all, nil
+	}
+	var filtered []Voucher
+	for _, v := range all {
+		if strings.EqualFold(v.Type, vtype) {
+			filtered = append(filtered, v)
+		}
+	}
+	return filtered, nil
+}
+
+// GetVouchersByParty returns all vouchers for a given party/ledger.
+func (db *DB) GetVouchersByParty(folderName, party string) []Voucher {
+	all, err := db.GetVouchers(folderName)
+	if err != nil {
+		return nil
+	}
+	var result []Voucher
+	for _, v := range all {
+		if strings.EqualFold(v.Party, party) {
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
+// TrialBalanceEntry is a group-wise trial balance line.
+type TrialBalanceEntry struct {
+	Group  string  `json:"group"`
+	Debit  float64 `json:"debit"`
+	Credit float64 `json:"credit"`
+}
+
+// tallyPrimaryGroup maps sub-groups to Tally's primary (top-level) groups.
+var tallyPrimaryGroup = map[string]string{
+	"Sundry Debtors":         "Current Assets",
+	"Sundry Creditors":       "Current Liabilities",
+	"Cash-in-Hand":           "Current Assets",
+	"Cash-in-hand":           "Current Assets",
+	"Bank Accounts":          "Current Assets",
+	"Bank OD A/c":            "Loans (Liability)",
+	"Bank OCC A/c":           "Loans (Liability)",
+	"Deposits (Asset)":       "Current Assets",
+	"Loans & Advances (Asset)": "Current Assets",
+	"Stock-in-Hand":          "Current Assets",
+	"Stock-in-hand":          "Current Assets",
+	"Duties & Taxes":         "Current Liabilities",
+	"Provisions":             "Current Liabilities",
+	"Secured Loans":          "Loans (Liability)",
+	"Unsecured Loans":        "Loans (Liability)",
+	"Capital Account":        "Loans (Liability)",
+	"Reserves & Surplus":     "Loans (Liability)",
+	"Suspense A/c":           "Current Assets",
+	"Branch / Divisions":     "Current Assets",
+	"Misc. Expenses (ASSET)": "Current Assets",
+	// Primary groups map to themselves
+	"Current Assets":       "Current Assets",
+	"Current Liabilities":  "Current Liabilities",
+	"Fixed Assets":         "Fixed Assets",
+	"Investments":          "Investments",
+	"Loans (Liability)":    "Loans (Liability)",
+	"Sales Accounts":       "Sales Accounts",
+	"Purchase Accounts":    "Purchase Accounts",
+	"Direct Incomes":       "Direct Incomes",
+	"Direct Expenses":      "Direct Expenses",
+	"Indirect Incomes":     "Indirect Incomes",
+	"Indirect Expenses":    "Indirect Expenses",
+}
+
+func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
+	masters, err := db.GetMasters(folderName)
+	if err != nil {
+		return nil, err
+	}
+	vouchers, err := db.GetVouchers(folderName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build ledger name → parent group map
+	ledgerGroup := make(map[string]string)
+	for _, l := range masters.Ledgers {
+		if l.Parent != "" {
+			ledgerGroup[l.Name] = l.Parent
+		}
+	}
+
+	// Helper to resolve primary group
+	resolve := func(subGroup string) string {
+		if p := tallyPrimaryGroup[subGroup]; p != "" {
+			return p
+		}
+		return subGroup
+	}
+
+	// Add opening balances from ledger masters
+	groupBal := make(map[string]*TrialBalanceEntry)
+	addEntry := func(group string, debit, credit float64) {
+		e, ok := groupBal[group]
+		if !ok {
+			e = &TrialBalanceEntry{Group: group}
+			groupBal[group] = e
+		}
+		e.Debit += debit
+		e.Credit += credit
+	}
+
+	for _, l := range masters.Ledgers {
+		if l.OpeningBal == 0 {
+			continue
+		}
+		group := resolve(l.Parent)
+		if group == "" {
+			continue
+		}
+		if l.OpeningBal < 0 {
+			addEntry(group, -l.OpeningBal, 0) // negative = debit in Tally
+		} else {
+			addEntry(group, 0, l.OpeningBal) // positive = credit
+		}
+	}
+
+	// Aggregate debit/credit by primary group (double entry)
+
+	for _, v := range vouchers {
+		if v.Party == "" || v.Amount == 0 {
+			continue
+		}
+		partyGroup := resolve(ledgerGroup[v.Party])
+		if partyGroup == "" {
+			partyGroup = "Current Assets"
+		}
+
+		switch v.Type {
+		case "Sales":
+			addEntry(partyGroup, v.Amount, 0) // Dr party (debtor)
+			taxable := v.Amount - v.TaxAmount
+			if v.TaxAmount > 0 && taxable > 0 {
+				addEntry("Sales Accounts", 0, taxable)             // Cr sales (net)
+				addEntry("Current Liabilities", 0, v.TaxAmount)   // Cr output GST
+			} else {
+				addEntry("Sales Accounts", 0, v.Amount) // Cr sales (full)
+			}
+		case "Purchase":
+			taxable := v.Amount - v.TaxAmount
+			if v.TaxAmount > 0 && taxable > 0 {
+				addEntry("Purchase Accounts", taxable, 0)          // Dr purchases (net)
+				addEntry("Current Assets", v.TaxAmount, 0)        // Dr input GST credit
+			} else {
+				addEntry("Purchase Accounts", v.Amount, 0) // Dr purchases (full)
+			}
+			addEntry(partyGroup, 0, v.Amount) // Cr party (creditor)
+		case "Receipt":
+			addEntry("Current Assets", v.Amount, 0) // Dr cash/bank
+			addEntry(partyGroup, 0, v.Amount)        // Cr party
+		case "Payment":
+			addEntry(partyGroup, v.Amount, 0)        // Dr party
+			addEntry("Current Assets", 0, v.Amount)  // Cr cash/bank
+		default:
+			addEntry(partyGroup, v.Amount, 0)
+		}
+	}
+
+	var result []TrialBalanceEntry
+	for _, e := range groupBal {
+		result = append(result, *e)
+	}
+	return result, nil
+}
+
+// GSTEntry is a GST summary line.
+type GSTEntry struct {
+	HSN       string  `json:"hsn"`
+	Rate      float64 `json:"gst_rate"`
+	Taxable   float64 `json:"taxable_value"`
+	CGST      float64 `json:"cgst"`
+	SGST      float64 `json:"sgst"`
+	IGST      float64 `json:"igst"`
+	ItemCount int     `json:"item_count"`
+}
+
+func (db *DB) GetGSTR1Summary(folderName string) ([]GSTEntry, error) {
+	vouchers, err := db.GetVouchers(folderName)
+	if err != nil {
+		return nil, err
+	}
+	type key struct{ hsn string; rate float64 }
+	agg := make(map[key]*GSTEntry)
+	for _, v := range vouchers {
+		for _, item := range v.Items {
+			if item.HSN == "" || item.Amount == 0 {
+				continue
+			}
+			// Validate HSN: must be numeric 4-8 digits
+			if len(item.HSN) < 4 || len(item.HSN) > 8 {
+				continue
+			}
+			isNumeric := true
+			for _, c := range item.HSN {
+				if c < '0' || c > '9' { isNumeric = false; break }
+			}
+			if !isNumeric {
+				continue
+			}
+			// Validate GST rate: must be 0, 5, 12, 18, or 28
+			rate := item.GSTRate
+			if rate != 0 && rate != 5 && rate != 12 && rate != 18 && rate != 28 && rate != 9 && rate != 14 && rate != 6 {
+				continue
+			}
+			k := key{item.HSN, rate}
+			e, ok := agg[k]
+			if !ok {
+				e = &GSTEntry{HSN: item.HSN, Rate: rate}
+				agg[k] = e
+			}
+			e.Taxable += item.Amount
+			tax := item.Amount * rate / 100
+			if v.State == "Odisha" {
+				e.CGST += tax / 2
+				e.SGST += tax / 2
+			} else {
+				e.IGST += tax
+			}
+			e.ItemCount++
+		}
+	}
+	var result []GSTEntry
+	for _, e := range agg {
+		result = append(result, *e)
+	}
+	return result, nil
+}
+
+// FindDataPath auto-detects the Tally data path from tally.ini.
+// Searches common locations for tally.ini and reads the Data= line.
+func FindDataPath() (string, error) {
+	// Common tally.ini locations on Windows
+	candidates := []string{
+		`C:\Program Files\TallyPrime\tally.ini`,
+		`C:\TallyPrime\tally.ini`,
+		`E:\Temp_tally\tally.ini`,
+		`D:\TallyPrime\tally.ini`,
+	}
+
+	for _, iniPath := range candidates {
+		if dp := readDataPathFromIni(iniPath); dp != "" {
+			return dp, nil
+		}
+	}
+	return "", fmt.Errorf("tally.ini not found in common locations")
+}
+
+func readDataPathFromIni(iniPath string) string {
+	f, err := os.Open(iniPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "Data=") {
+			return strings.TrimPrefix(line, "Data=")
+		}
+	}
+	return ""
+}
+
+// hasManagerFile checks if a directory contains Manager.1800 or Manager.900.
+func hasManagerFile(dir string) bool {
+	for _, ext := range []string{".1800", ".900"} {
+		if _, err := os.Stat(filepath.Join(dir, "Manager"+ext)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveFile finds a file with either .1800 or .900 extension.
+func ResolveFile(dir, baseName string) string {
+	for _, ext := range []string{".1800", ".900"} {
+		p := filepath.Join(dir, baseName+ext)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
