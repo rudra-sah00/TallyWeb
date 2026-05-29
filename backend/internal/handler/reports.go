@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"sort"
+	"strings"
 )
 
 type ReportHandler struct{ Base }
@@ -116,4 +117,27 @@ func (h *ReportHandler) Aging(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, data)
+}
+
+func (h *ReportHandler) CashBankBook(w http.ResponseWriter, r *http.Request) {
+	folder := h.CompanyFolder(r)
+	vouchers, err := h.DB.GetVouchers(folder)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Filter to vouchers where party is Cash or Bank
+	var entries []map[string]any
+	for _, v := range vouchers {
+		if v.Party == "Cash" || strings.Contains(v.Party, "SBI") || strings.Contains(v.Party, "BOB") {
+			entries = append(entries, map[string]any{
+				"date":   v.Date,
+				"number": v.Number,
+				"type":   v.Type,
+				"party":  v.Party,
+				"amount": v.Amount,
+			})
+		}
+	}
+	WriteJSON(w, http.StatusOK, entries)
 }

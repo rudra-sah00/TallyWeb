@@ -132,6 +132,7 @@ func main() {
 	protected.HandleFunc("GET /api/reports/stock-balance", middleware.RBAC("reports", reports.StockBalance))
 	protected.HandleFunc("GET /api/reports/day-book", middleware.RBAC("reports", reports.DayBook))
 	protected.HandleFunc("GET /api/reports/aging", middleware.RBAC("reports", reports.Aging))
+	protected.HandleFunc("GET /api/reports/cash-bank-book", middleware.RBAC("reports", reports.CashBankBook))
 	protected.HandleFunc("GET /api/banking/transactions", middleware.RBAC("reports", banking.List))
 	protected.HandleFunc("GET /api/auth/users", middleware.RBAC("users.list", authH.ListUsers))
 	protected.HandleFunc("POST /api/auth/users", authH.CreateUser)
