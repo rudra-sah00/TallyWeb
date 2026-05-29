@@ -223,7 +223,12 @@ func (db *DB) GetVouchers(folderName string) ([]Voucher, error) {
 		case "Sundry Creditors":
 			vouchers[i].Type = "Purchase"
 		case "Cash-in-Hand", "Cash-in-hand", "Bank Accounts", "Bank OD A/c":
-			vouchers[i].Type = "Payment"
+			// Cash/Bank party with items or amount = Cash Sale, otherwise = Payment
+			if len(vouchers[i].Items) > 0 || vouchers[i].Amount > 0 {
+				vouchers[i].Type = "Sales"
+			} else {
+				vouchers[i].Type = "Payment"
+			}
 		default:
 			if len(vouchers[i].Items) > 0 || vouchers[i].Amount > 0 {
 				vouchers[i].Type = "Sales"
