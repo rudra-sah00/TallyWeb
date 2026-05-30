@@ -34,3 +34,13 @@ func (h *StockHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 	}
 	WriteJSON(w, http.StatusCreated, map[string]any{"name": req.Name, "seq": seq})
 }
+
+func (h *StockHandler) PriceLists(w http.ResponseWriter, r *http.Request) {
+	folder := h.CompanyFolder(r)
+	lists, err := h.DB.GetPriceLists(folder)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, lists)
+}

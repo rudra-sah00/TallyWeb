@@ -188,12 +188,10 @@ func (db *DB) GetVouchers(folderName string) ([]Voucher, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Infer voucher type from party's ledger group
 	masters, err := db.GetMasters(folderName)
 	if err != nil {
 		return vouchers, nil
 	}
-	// Get company name to detect purchases (party = own company)
 	companyInfo, _ := db.GetCompanyInfo(folderName)
 	companyName := ""
 	if companyInfo != nil {
@@ -206,25 +204,57 @@ func (db *DB) GetVouchers(folderName string) ([]Voucher, error) {
 			ledgerGroup[l.Name] = l.Parent
 		}
 	}
+
+	isCompanyParty := func(party string) bool {
+		if companyName == "" || party == "" {
+			return false
+		}
+		return party == companyName || strings.HasPrefix(party, companyName[:min(len(companyName), 15)])
+	}
+
 	for i := range vouchers {
 		if vouchers[i].Type != "" {
 			continue
 		}
+		num := vouchers[i].Number
 		party := vouchers[i].Party
-		// If party is the company itself → Purchase
-		if companyName != "" && (party == companyName || strings.HasPrefix(party, companyName[:min(len(companyName), 15)])) {
+
+		// 1. Detect type from voucher number pattern
+		switch {
+		case num == "R" && isCompanyParty(party):
+			vouchers[i].Type = "Receipt"
+			continue
+		case strings.HasPrefix(num, "CN-") || strings.HasPrefix(num, "CN/"):
+			vouchers[i].Type = "Credit Note"
+			continue
+		case strings.HasPrefix(num, "DN-") || strings.HasPrefix(num, "DN/"):
+			vouchers[i].Type = "Debit Note"
+			continue
+		}
+
+		// 2. Party is own company → Purchase (inward invoices)
+		if isCompanyParty(party) {
 			vouchers[i].Type = "Purchase"
 			continue
 		}
+
+		// 3. No party at all → Journal (auto-generated GST or manual journal)
+		if party == "" {
+			vouchers[i].Type = "Journal"
+			continue
+		}
+
+		// 4. Infer from ledger group
 		group := ledgerGroup[party]
 		switch group {
 		case "Sundry Debtors":
 			vouchers[i].Type = "Sales"
 		case "Sundry Creditors":
 			vouchers[i].Type = "Purchase"
-		case "Cash-in-Hand", "Cash-in-hand", "Bank Accounts", "Bank OD A/c":
-			// Cash/Bank party with items or amount = Cash Sale, otherwise = Payment
-			if len(vouchers[i].Items) > 0 || vouchers[i].Amount > 0 {
+		case "Cash-in-Hand", "Cash-in-hand":
+			vouchers[i].Type = "Sales"
+		case "Bank Accounts", "Bank OD A/c":
+			if len(vouchers[i].Items) > 0 {
 				vouchers[i].Type = "Sales"
 			} else {
 				vouchers[i].Type = "Payment"
@@ -235,7 +265,7 @@ func (db *DB) GetVouchers(folderName string) ([]Voucher, error) {
 			}
 		}
 	}
-	// Filter out system entries (Opening Entry etc.) with no useful data
+
 	filtered := vouchers[:0]
 	for _, v := range vouchers {
 		if v.Number == "OE" && v.Party == "" && v.Amount == 0 {
@@ -254,6 +284,11 @@ func min(a, b int) int {
 // GetBankEntries returns banking transactions from LinkMgr.
 func (db *DB) GetBankEntries(folderName string) ([]BankEntry, error) {
 	return ParseBankEntries(db.CompanyDir(folderName))
+}
+
+// GetPriceLists returns available price lists.
+func (db *DB) GetPriceLists(folderName string) ([]PriceList, error) {
+	return ParsePriceLists(db.CompanyDir(folderName))
 }
 
 // GetGSTReturns returns pre-computed GST data from Aggr.1800.
@@ -312,38 +347,38 @@ type TrialBalanceEntry struct {
 
 // tallyPrimaryGroup maps sub-groups to Tally's primary (top-level) groups.
 var tallyPrimaryGroup = map[string]string{
-	"Sundry Debtors":         "Current Assets",
-	"Sundry Creditors":       "Current Liabilities",
-	"Cash-in-Hand":           "Current Assets",
-	"Cash-in-hand":           "Current Assets",
-	"Bank Accounts":          "Current Assets",
-	"Bank OD A/c":            "Loans (Liability)",
-	"Bank OCC A/c":           "Loans (Liability)",
-	"Deposits (Asset)":       "Current Assets",
+	"Sundry Debtors":           "Current Assets",
+	"Sundry Creditors":         "Current Liabilities",
+	"Cash-in-Hand":             "Current Assets",
+	"Cash-in-hand":             "Current Assets",
+	"Bank Accounts":            "Current Assets",
+	"Bank OD A/c":              "Loans (Liability)",
+	"Bank OCC A/c":             "Loans (Liability)",
+	"Deposits (Asset)":         "Current Assets",
 	"Loans & Advances (Asset)": "Current Assets",
-	"Stock-in-Hand":          "Current Assets",
-	"Stock-in-hand":          "Current Assets",
-	"Duties & Taxes":         "Current Liabilities",
-	"Provisions":             "Current Liabilities",
-	"Secured Loans":          "Loans (Liability)",
-	"Unsecured Loans":        "Loans (Liability)",
-	"Capital Account":        "Loans (Liability)",
-	"Reserves & Surplus":     "Loans (Liability)",
-	"Suspense A/c":           "Current Assets",
-	"Branch / Divisions":     "Current Assets",
-	"Misc. Expenses (ASSET)": "Current Assets",
+	"Stock-in-Hand":            "Current Assets",
+	"Stock-in-hand":            "Current Assets",
+	"Duties & Taxes":           "Current Liabilities",
+	"Provisions":               "Current Liabilities",
+	"Secured Loans":            "Loans (Liability)",
+	"Unsecured Loans":          "Loans (Liability)",
+	"Capital Account":          "Loans (Liability)",
+	"Reserves & Surplus":       "Profit & Loss A/c",
+	"Suspense A/c":             "Current Assets",
+	"Branch / Divisions":       "Current Assets",
+	"Misc. Expenses (ASSET)":   "Current Assets",
+	"Fixed Assets":             "Fixed Assets",
+	"Investments":              "Investments",
+	"Sales Accounts":           "Sales Accounts",
+	"Purchase Accounts":        "Purchase Accounts",
+	"Direct Incomes":           "Direct Incomes",
+	"Direct Expenses":          "Direct Expenses",
+	"Indirect Incomes":         "Indirect Incomes",
+	"Indirect Expenses":        "Indirect Expenses",
 	// Primary groups map to themselves
 	"Current Assets":       "Current Assets",
 	"Current Liabilities":  "Current Liabilities",
-	"Fixed Assets":         "Fixed Assets",
-	"Investments":          "Investments",
 	"Loans (Liability)":    "Loans (Liability)",
-	"Sales Accounts":       "Sales Accounts",
-	"Purchase Accounts":    "Purchase Accounts",
-	"Direct Incomes":       "Direct Incomes",
-	"Direct Expenses":      "Direct Expenses",
-	"Indirect Incomes":     "Indirect Incomes",
-	"Indirect Expenses":    "Indirect Expenses",
 }
 
 func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
@@ -356,7 +391,6 @@ func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
 		return nil, err
 	}
 
-	// Build ledger name → parent group map
 	ledgerGroup := make(map[string]string)
 	for _, l := range masters.Ledgers {
 		if l.Parent != "" {
@@ -364,7 +398,6 @@ func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
 		}
 	}
 
-	// Helper to resolve primary group
 	resolve := func(subGroup string) string {
 		if p := tallyPrimaryGroup[subGroup]; p != "" {
 			return p
@@ -372,7 +405,6 @@ func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
 		return subGroup
 	}
 
-	// Add opening balances from ledger masters
 	groupBal := make(map[string]*TrialBalanceEntry)
 	addEntry := func(group string, debit, credit float64) {
 		e, ok := groupBal[group]
@@ -384,6 +416,7 @@ func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
 		e.Credit += credit
 	}
 
+	// Opening balances
 	for _, l := range masters.Ledgers {
 		if l.OpeningBal == 0 {
 			continue
@@ -393,50 +426,82 @@ func (db *DB) GetTrialBalance(folderName string) ([]TrialBalanceEntry, error) {
 			continue
 		}
 		if l.OpeningBal < 0 {
-			addEntry(group, -l.OpeningBal, 0) // negative = debit in Tally
+			addEntry(group, -l.OpeningBal, 0)
 		} else {
-			addEntry(group, 0, l.OpeningBal) // positive = credit
+			addEntry(group, 0, l.OpeningBal)
 		}
 	}
 
-	// Aggregate debit/credit by primary group (double entry)
-
+	// Process vouchers with computed GST journals
 	for _, v := range vouchers {
-		if v.Party == "" || v.Amount == 0 {
+		if v.Amount == 0 {
 			continue
 		}
 		partyGroup := resolve(ledgerGroup[v.Party])
-		if partyGroup == "" {
+		if partyGroup == "" && v.Party != "" {
 			partyGroup = "Current Assets"
+		}
+
+		// Compute tax from items if not already extracted
+		taxAmount := v.TaxAmount
+		if taxAmount == 0 && len(v.Items) > 0 {
+			for _, item := range v.Items {
+				if item.GSTRate > 0 && item.Amount > 0 {
+					taxAmount += item.Amount * item.GSTRate / 100
+				}
+			}
+		}
+		// Fallback: estimate 18% GST if we have items but no rate info
+		if taxAmount == 0 && len(v.Items) > 0 {
+			itemTotal := 0.0
+			for _, item := range v.Items {
+				itemTotal += item.Amount
+			}
+			if itemTotal > 0 && v.Amount > itemTotal*1.05 {
+				taxAmount = v.Amount - itemTotal
+			}
 		}
 
 		switch v.Type {
 		case "Sales":
-			addEntry(partyGroup, v.Amount, 0) // Dr party (debtor)
-			taxable := v.Amount - v.TaxAmount
-			if v.TaxAmount > 0 && taxable > 0 {
-				addEntry("Sales Accounts", 0, taxable)             // Cr sales (net)
-				addEntry("Current Liabilities", 0, v.TaxAmount)   // Cr output GST
+			addEntry(partyGroup, v.Amount, 0) // Dr party
+			taxable := v.Amount - taxAmount
+			if taxAmount > 0 && taxable > 0 {
+				addEntry("Sales Accounts", 0, taxable)
+				addEntry("Current Liabilities", 0, taxAmount) // Output GST
 			} else {
-				addEntry("Sales Accounts", 0, v.Amount) // Cr sales (full)
+				addEntry("Sales Accounts", 0, v.Amount)
 			}
 		case "Purchase":
-			taxable := v.Amount - v.TaxAmount
-			if v.TaxAmount > 0 && taxable > 0 {
-				addEntry("Purchase Accounts", taxable, 0)          // Dr purchases (net)
-				addEntry("Current Assets", v.TaxAmount, 0)        // Dr input GST credit
+			taxable := v.Amount - taxAmount
+			if taxAmount > 0 && taxable > 0 {
+				addEntry("Purchase Accounts", taxable, 0)
+				addEntry("Current Liabilities", taxAmount, 0) // Input GST (reduces liability)
 			} else {
-				addEntry("Purchase Accounts", v.Amount, 0) // Dr purchases (full)
+				addEntry("Purchase Accounts", v.Amount, 0)
 			}
-			addEntry(partyGroup, 0, v.Amount) // Cr party (creditor)
+			addEntry(partyGroup, 0, v.Amount) // Cr party
 		case "Receipt":
-			addEntry("Current Assets", v.Amount, 0) // Dr cash/bank
-			addEntry(partyGroup, 0, v.Amount)        // Cr party
+			addEntry("Current Assets", v.Amount, 0)  // Dr bank/cash
+			addEntry(partyGroup, 0, v.Amount)         // Cr supplier (reduces payable)
 		case "Payment":
-			addEntry(partyGroup, v.Amount, 0)        // Dr party
-			addEntry("Current Assets", 0, v.Amount)  // Cr cash/bank
-		default:
-			addEntry(partyGroup, v.Amount, 0)
+			addEntry(partyGroup, v.Amount, 0)         // Dr expense/party
+			addEntry("Current Assets", 0, v.Amount)   // Cr bank/cash
+		case "Journal":
+			// Journals are double-entry with no net effect on one group
+			// but they move between groups (e.g., GST set-off)
+			if v.Amount > 0 && partyGroup != "" {
+				addEntry(partyGroup, v.Amount, 0)
+				addEntry("Current Liabilities", 0, v.Amount)
+			}
+		case "Credit Note":
+			// Reverse of sale
+			addEntry("Sales Accounts", v.Amount, 0)   // Dr sales (reduce)
+			addEntry(partyGroup, 0, v.Amount)          // Cr party (reduce receivable)
+		case "Debit Note":
+			// Reverse of purchase
+			addEntry(partyGroup, v.Amount, 0)          // Dr supplier
+			addEntry("Purchase Accounts", 0, v.Amount) // Cr purchases (reduce)
 		}
 	}
 

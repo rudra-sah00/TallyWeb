@@ -118,6 +118,7 @@ func main() {
 	protected.HandleFunc("POST /api/groups", middleware.RBAC("groups", groups.Create))
 	protected.HandleFunc("GET /api/stock-items", middleware.RBAC("stock-items", stock.ListItems))
 	protected.HandleFunc("POST /api/stock-items", middleware.RBAC("stock-items", stock.CreateItem))
+	protected.HandleFunc("GET /api/price-lists", middleware.RBAC("stock-items", stock.PriceLists))
 	protected.HandleFunc("GET /api/units", middleware.RBAC("units", units.List))
 	protected.HandleFunc("GET /api/godowns", middleware.RBAC("stock-items", godowns.List))
 	protected.HandleFunc("GET /api/employees", middleware.RBAC("reports", employees.List))

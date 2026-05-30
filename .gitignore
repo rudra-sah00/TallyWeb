@@ -25,3 +25,17 @@ Thumbs.db
 
 # Build
 dist/
+
+# Tally Data (binary company files - sensitive + large)
+TallyData/
+*.1800
+*.900
+*.TSF
+*.dmp
+*.exe
+
+# Ghidra project files
+TallyData/ghidra_project/
+TallyData/decompiled/
+TallyData/tally_dumped.exe
+TallyData/tally_full.dmp
