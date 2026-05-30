@@ -70,7 +70,8 @@ func ParseVouchers(dataDir string) ([]Voucher, error) {
 	var vouchers []Voucher
 	for _, seq := range seqOrder {
 		group := seqGroups[seq]
-		// Only consider groups that have at least one type=0x0005 page
+
+		// Primary vouchers: have ObjType=0x0005
 		hasDataPage := false
 		for _, p := range group {
 			if p.Header.ObjType == 0x0005 {
@@ -78,44 +79,77 @@ func ParseVouchers(dataDir string) ([]Voucher, error) {
 				break
 			}
 		}
-		if !hasDataPage {
-			continue
-		}
 
-		v := Voucher{}
-		for _, p := range group {
-			if isVoucherItemPage(p.Fields) {
-				v.Items = append(v.Items, parseVoucherItems(p.Fields)...)
-			}
-			for _, f := range p.Fields {
-				enrichVoucher(&v, f, p.Header.PageIdx)
-			}
-		}
-		// Extract GST tax from pidx=1 pages (fid=0x0003=CGST, fid=0x0004=SGST)
-		if v.Amount > 0 {
+		if hasDataPage {
+			v := Voucher{}
 			for _, p := range group {
-				if p.Header.ObjType == 0x0005 && p.Header.PageIdx == 1 {
-					for _, f := range p.Fields {
-						if f.Type == 'L' && (f.ID == 0x0003 || f.ID == 0x0004) {
-							tax := float64(f.Int64) / 100000.0
-							if tax > 0 && tax < v.Amount*0.15 {
-								v.TaxAmount += tax
+				if isVoucherItemPage(p.Fields) {
+					v.Items = append(v.Items, parseVoucherItems(p.Fields)...)
+				}
+				for _, f := range p.Fields {
+					enrichVoucher(&v, f, p.Header.PageIdx)
+				}
+			}
+			if v.Amount > 0 {
+				for _, p := range group {
+					if p.Header.ObjType == 0x0005 && p.Header.PageIdx == 1 {
+						for _, f := range p.Fields {
+							if f.Type == 'L' && (f.ID == 0x0003 || f.ID == 0x0004) {
+								tax := float64(f.Int64) / 100000.0
+								if tax > 0 && tax < v.Amount*0.15 {
+									v.TaxAmount += tax
+								}
 							}
 						}
 					}
 				}
 			}
-		}
-		if v.Number != "" || v.Party != "" {
-			vouchers = append(vouchers, v)
-		}
-	}
-
-	for i := range vouchers {
-		if vouchers[i].Type != "" {
+			if v.Number != "" || v.Party != "" {
+				vouchers = append(vouchers, v)
+			}
 			continue
 		}
-		// Type will be determined by ledger group mapping after return
+
+		// Secondary vouchers: 0x000B+0x0042 only (Journals, Payments, Contras, NEFT etc)
+		has0B := false
+		has42 := false
+		for _, p := range group {
+			if p.Header.ObjType == 0x000B { has0B = true }
+			if p.Header.ObjType == 0x0042 { has42 = true }
+		}
+		if !has0B || !has42 {
+			continue
+		}
+
+		v := Voucher{}
+		for _, p := range group {
+			for _, f := range p.Fields {
+				if f.Type == 'S' && f.ID == 0x0006 && v.Number == "" { v.Number = f.Str }
+				if f.Type == 'S' && f.ID == 0x00CC && v.Number == "" { v.Number = f.Str }
+				if f.Type == 'S' && f.ID == 0x07D5 && v.Number == "" { v.Number = f.Str }
+				if f.Type == 'S' && f.ID == 0x000D && v.Party == "" { v.Party = f.Str }
+				if f.Type == 'S' && f.ID == 0x03ED && v.Party == "" { v.Party = f.Str }
+				if f.Type == 'S' && f.ID == 0x03F4 && v.Narration == "" { v.Narration = f.Str }
+				if f.Type == 'D' && (f.ID == 0x0002 || f.ID == 0x00CB) && v.Date == "" {
+					days := int(f.Int32) - 2
+					year := 1900
+					for { diy := 365; if (year%4==0&&year%100!=0)||year%400==0{diy=366}; if days<diy{break}; days-=diy; year++ }
+					month := 1
+					for _, md := range []int{31,28,31,30,31,30,31,31,30,31,30,31} { m:=md; if month==2&&((year%4==0&&year%100!=0)||year%400==0){m=29}; if days<m{break}; days-=m; month++ }
+					v.Date = fmt.Sprintf("%02d-%02d-%04d", days+1, month, year)
+				}
+				// Amounts on 0x0042 pages use fid=0x0002 type 'L' (type marker 0x09)
+				if f.Type == 'L' && v.Amount == 0 {
+					amt := float64(f.Int64) / 100000.0
+					if amt > 1 && amt < 10000000 {
+						v.Amount = amt
+					}
+				}
+			}
+		}
+		if v.Number != "" || v.Amount > 0 {
+			vouchers = append(vouchers, v)
+		}
 	}
 	return vouchers, nil
 }

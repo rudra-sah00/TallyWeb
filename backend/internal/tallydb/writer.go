@@ -39,6 +39,16 @@ func DeleteIndexFiles(companyDir string) {
 	}
 }
 
+// DeleteCacheFiles removes all regenerable cache files (for voucher writes).
+func DeleteCacheFiles(companyDir string) {
+	for _, f := range []string{
+		"Index.1800", "TSTATE.TSF", "TUPDATE.TSF",
+		"Aggr.1800", "VchStatus.1800", "StatStatus.1800",
+	} {
+		os.Remove(companyDir + "/" + f)
+	}
+}
+
 // --- Internal helpers ---
 
 // findTemplatePages finds pidx=2 by name, then pidx=0 by matching seq.

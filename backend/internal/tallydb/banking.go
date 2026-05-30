@@ -7,14 +7,17 @@ import (
 
 // BankEntry is a transaction from LinkMgr.1800.
 type BankEntry struct {
-	Bank        string `json:"bank"`
-	Branch      string `json:"branch,omitempty"`
-	AccountNo   string `json:"account_no,omitempty"`
-	IFSC        string `json:"ifsc,omitempty"`
-	PaymentMode string `json:"payment_mode,omitempty"`
-	VoucherID   string `json:"voucher_id,omitempty"`
-	Amount      int64  `json:"amount,omitempty"`
-	Date        string `json:"date,omitempty"`
+	Bank        string  `json:"bank"`
+	Branch      string  `json:"branch,omitempty"`
+	AccountNo   string  `json:"account_no,omitempty"`
+	IFSC        string  `json:"ifsc,omitempty"`
+	PaymentMode string  `json:"payment_mode,omitempty"`
+	VoucherID   string  `json:"voucher_id,omitempty"`
+	Amount      float64 `json:"amount,omitempty"`
+	Date        string  `json:"date,omitempty"`
+	Payee       string  `json:"payee,omitempty"`
+	ChequeRange string  `json:"cheque_range,omitempty"`
+	TxnType     string  `json:"txn_type,omitempty"`
 }
 
 // ParseBankEntries reads LinkMgr.1800 for banking data.
@@ -30,9 +33,8 @@ func ParseBankEntries(dataDir string) ([]BankEntry, error) {
 
 	var entries []BankEntry
 	for _, page := range pages {
-		// Only type=0x0054 and 0x006F have TLV bank data
 		ot := page.Header.ObjType
-		if ot != 0x0054 && ot != 0x006F {
+		if ot != 0x0054 && ot != 0x006F && ot != 0x0030 {
 			continue
 		}
 
@@ -41,8 +43,7 @@ func ParseBankEntries(dataDir string) ([]BankEntry, error) {
 		for _, f := range page.Fields {
 			switch {
 			case f.Type == 'S' && f.ID == 0x2331:
-				e.Bank = f.Str
-				hasBank = true
+				e.Bank = f.Str; hasBank = true
 			case f.Type == 'S' && f.ID == 0x2332:
 				e.Branch = f.Str
 			case f.Type == 'S' && f.ID == 0x2333:
@@ -51,14 +52,19 @@ func ParseBankEntries(dataDir string) ([]BankEntry, error) {
 				e.IFSC = f.Str
 			case f.Type == 'S' && f.ID == 0x2346:
 				e.PaymentMode = f.Str
+			case f.Type == 'S' && f.ID == 0x2358:
+				e.TxnType = f.Str
 			case f.Type == 'S' && f.ID == 0x235B:
 				e.VoucherID = f.Str
+			case f.Type == 'S' && f.ID == 0x232C:
+				e.ChequeRange = f.Str
+			case f.Type == 'S' && f.ID == 0x232E && e.Payee == "":
+				e.Payee = f.Str
+			case f.Type == 'L' && f.ID == 0x0002 && e.Amount == 0:
+				amt := float64(f.Int64) / 100000.0
+				if amt > 100 { e.Amount = amt }
 			}
 		}
-		// Extract amount+date from type 0x07 fields
-		// In LinkMgr, the raw page bytes have: fid(2) 00 07 amount(4) date(2)
-		// Our reader sees these as 'I' type with ID at various offsets
-		// For now, use any date field found
 		for _, f := range page.Fields {
 			if f.Type == 'D' && e.Date == "" {
 				days := int(f.Int32) - 2
@@ -66,8 +72,7 @@ func ParseBankEntries(dataDir string) ([]BankEntry, error) {
 				e.Date = t.Format("02-01-2006")
 			}
 		}
-
-		if hasBank {
+		if hasBank || e.Payee != "" {
 			entries = append(entries, e)
 		}
 	}

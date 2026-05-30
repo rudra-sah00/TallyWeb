@@ -98,15 +98,19 @@ func ParseMasters(dataDir string) (*Masters, error) {
 	groupBySeq := make(map[uint32]string)
 	for _, page := range pages {
 		seq := page.Header.SeqNum
-		if seq > 100 {
-			continue
-		}
 		pidx := page.Header.PageIdx
 		if pidx != 1 && pidx != 2 {
 			continue
 		}
+		if page.Header.ObjType != 0x000B {
+			continue
+		}
+		// Skip pages that have FldLedgerName (these are ledgers, not groups)
+		if hasField(page.Fields, FldLedgerName) {
+			continue
+		}
 		name := getFieldStr(page.Fields, FldName)
-		if name != "" && groupBySeq[seq] == "" {
+		if name != "" && groupBySeq[seq] == "" && !isVoucherTypeName(name) {
 			groupBySeq[seq] = name
 		}
 	}
@@ -176,6 +180,21 @@ func ParseMasters(dataDir string) (*Masters, error) {
 	// For OBs on unknown seqs, find their name from fid=0x0002 or 0x01F7 on same seq
 	// Also try reading UTF-16 string at page offset 28 (header name for system ledgers)
 	nameBySeq := make(map[uint32]string)
+	parentBySeq := make(map[uint32]uint32) // track parent seq for filtering
+
+	// Build set of voucher type definition seqs (they have known short names in fid=0x01F7)
+	vchTypeSeqs := make(map[uint32]bool)
+	for _, page := range pages {
+		if page.Header.ObjType != 0x000B {
+			continue
+		}
+		for _, f := range page.Fields {
+			if f.Type == 'S' && f.ID == FldLedgerName && isVoucherTypeName(f.Str) {
+				vchTypeSeqs[page.Header.SeqNum] = true
+			}
+		}
+	}
+
 	for _, page := range pages {
 		seq := page.Header.SeqNum
 		if _, need := obBySeq[seq]; !need {
@@ -183,6 +202,9 @@ func ParseMasters(dataDir string) (*Masters, error) {
 		}
 		if _, already := ledgerSeqs[seq]; already {
 			continue
+		}
+		if page.Header.PageIdx == 0 && page.Header.ObjType == 0x000B {
+			parentBySeq[seq] = page.Header.ParentSeq
 		}
 		if nameBySeq[seq] != "" {
 			continue
@@ -224,10 +246,16 @@ func ParseMasters(dataDir string) (*Masters, error) {
 		if isVoucherTypeName(name) || isCurrencyName(name) {
 			continue
 		}
+		// Skip entries whose parent is a voucher type definition
+		if vchTypeSeqs[parentBySeq[seq]] {
+			continue
+		}
 		l := Ledger{Name: name, OpeningBal: ob}
 		l.Parent = inferSystemLedgerGroup(name)
 		m.Ledgers = append(m.Ledgers, l)
 	}
+	// Exclude unnamed OB seqs whose parent is a voucher type (seq 32-56)
+	// These are voucher type balance entries, not real ledgers
 
 	// Third pass: enrich ledgers from pidx=0 pages (contact/tax details)
 	for _, page := range pages {
@@ -565,8 +593,9 @@ func hasField(fields []Field, id uint16) bool {
 	return false
 }
 
-// inferSystemLedgerGroup determines the parent group for system/built-in ledgers.
-// Only uses Tally-standard patterns (same across ALL Tally installations).
+// inferSystemLedgerGroup determines the parent group for Tally's built-in ledgers.
+// Only "Cash" and "Profit & Loss A/c" are guaranteed system ledgers across ALL companies.
+// For user-created ledgers without a resolved parent, returns empty string.
 func inferSystemLedgerGroup(name string) string {
 	switch name {
 	case "Cash":
@@ -574,21 +603,11 @@ func inferSystemLedgerGroup(name string) string {
 	case "Profit & Loss A/c":
 		return "Reserves & Surplus"
 	}
-	switch {
-	case strings.HasPrefix(name, "Input CGST") || strings.HasPrefix(name, "Input SGST") ||
-		strings.HasPrefix(name, "Input IGST") || strings.HasPrefix(name, "Output CGST") ||
-		strings.HasPrefix(name, "Output SGST") || strings.HasPrefix(name, "Output IGST") ||
-		strings.HasPrefix(name, "GST ") || strings.HasPrefix(name, "GST Payble") ||
-		strings.HasPrefix(name, "GST Reverse") ||
-		(strings.HasPrefix(name, "ST @") && strings.Contains(name, "%")) ||
-		(strings.HasPrefix(name, "GST @") && strings.Contains(name, "%")) ||
-		strings.Contains(name, "SGST") || strings.Contains(name, "CGST") || strings.Contains(name, "IGST"):
+	// GST ledgers follow a standard naming convention set by Tally's GST module
+	if strings.Contains(name, "SGST") || strings.Contains(name, "CGST") || strings.Contains(name, "IGST") ||
+		strings.HasPrefix(name, "Input ") || strings.HasPrefix(name, "Output ") ||
+		strings.HasPrefix(name, "GST ") || strings.HasPrefix(name, "ST @") {
 		return "Duties & Taxes"
-	case strings.Contains(name, "ODA-") || strings.Contains(name, "OD A/c"):
-		return "Bank OD A/c"
-	case strings.HasPrefix(name, "SBI") || strings.Contains(name, "AGCCA"):
-		return "Bank Accounts"
-	default:
-		return "Sundry Debtors"
 	}
+	return ""
 }
